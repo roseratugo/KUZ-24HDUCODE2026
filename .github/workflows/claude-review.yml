@@ -8,15 +8,18 @@ jobs:
   review:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
       issues: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: "Review this pull request for code quality, correctness, and security. Analyze the diff, then post your findings as review comments."
-          claude_args: "--max-turns 5"
+          claude_args: "--max-turns 10"
+          show_full_output: true
