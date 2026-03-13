@@ -8,18 +8,28 @@ jobs:
   review:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
-      issues: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: "Review this pull request for code quality, correctness, and security. Analyze the diff, then post your findings as review comments."
-          claude_args: "--max-turns 10"
-          show_full_output: true
+          use_sticky_comment: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. Focus on:
+            - Code quality and best practices
+            - Potential bugs or logic errors
+            - Security implications
+            - Performance considerations
+
+          claude_args: |
+            --max-turns 10
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Read,Glob,Grep"
