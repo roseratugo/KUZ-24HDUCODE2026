@@ -1,0 +1,30 @@
+frontend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.css'
+      - '**/*.scss'
+      - '**/*.html'
+      - '**/*.tsx'
+      - '**/*.jsx'
+      - 'src/components/**'
+      - 'public/**'
+
+backend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'api/**'
+      - '**/*.py'
+      - '**/*.go'
+      - '**/*.java'
+      - 'server/**'
+
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.md'
+      - 'docs/**'
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**'
