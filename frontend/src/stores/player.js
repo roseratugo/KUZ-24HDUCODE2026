@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { playerApi } from '../api/client';
 import { useShipStore } from './ship';
+import { useMapStore } from './map';
 
 export const usePlayerStore = defineStore('player', {
   state: () => ({
@@ -33,6 +34,15 @@ export const usePlayerStore = defineStore('player', {
         if (response.data.ship) {
           const shipStore = useShipStore();
           shipStore.updateFromPlayerDetails(response.data.ship);
+        }
+
+        // Sync island states to local DB
+        if (response.data.discoveredIslands?.length) {
+          const mapStore = useMapStore();
+          if (mapStore.islands.size === 0) {
+            await mapStore.loadFromDB();
+          }
+          await mapStore.syncIslandStates(response.data.discoveredIslands);
         }
       } catch (err) {
         this.error = err.response?.data?.message || 'Erreur lors du chargement des details';
