@@ -180,6 +180,12 @@ export class GameScene {
           0.05
         );
       }
+
+      // Camera follows boat
+      const camOffset = new THREE.Vector3(25, 30, 50);
+      const targetCamPos = this.boat.position.clone().add(camOffset);
+      this.camera.position.lerp(targetCamPos, 0.03);
+      this.controls.target.lerp(this.boat.position, 0.05);
     }
 
     this.controls.update();
