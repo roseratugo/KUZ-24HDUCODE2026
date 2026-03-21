@@ -15,6 +15,27 @@ export class IslandManager {
     this.lastClusterCount = 0;
   }
 
+  setShipPosition(sx, sy, radius) {
+    this.shipX = sx;
+    this.shipY = sy;
+    this.renderRadius = radius;
+
+    // Remove cells outside render radius
+    let removed = false;
+    for (const [key, cell] of this.sandCells) {
+      const dx = cell.x - sx;
+      const dy = cell.y - sy;
+      if (dx * dx + dy * dy > radius * radius * 1.3) { // 30% hysteresis
+        this.sandCells.delete(key);
+        removed = true;
+      }
+    }
+    if (removed) {
+      this.dirty = true;
+      this.scheduleRebuild();
+    }
+  }
+
   addCell(cell) {
     if (cell.type !== 'SAND' && !cell.island) return;
     const key = `${cell.x},${cell.y}`;
