@@ -9,7 +9,8 @@
       "Bash(pip install:*)",
       "Bash(pip3 install:*)",
       "Bash(python -m pip install requests pymongo)",
-      "Bash(python3 -m pip install requests pymongo)"
+      "Bash(python3 -m pip install requests pymongo)",
+      "Bash(find /c/Users/zaki7/Documents/24h/KUZ-24HDUCODE2026/bot -type f \\\\\\(-name vite.config.* -o -name docker-compose*.yml \\\\\\))"
     ]
   }
 }
