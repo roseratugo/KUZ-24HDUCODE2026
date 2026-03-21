@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { shipApi } from '../api/client';
-import { movesApi } from '../api/mapApi';
+import { movesApi, shipPositionApi } from '../api/mapApi';
 
 const STORAGE_KEY = 'kuz-ship-state';
 
@@ -124,10 +124,17 @@ export const useShipStore = defineStore('ship', {
 
         this.moveHistory.push(moveRecord);
 
-        // Save to DB (fire and forget)
+        // Save move to DB (fire and forget)
         movesApi.save(moveRecord).catch(err => {
           console.error('Failed to save move to DB:', err);
         });
+
+        // Save position to DB (fire and forget)
+        if (data.position) {
+          shipPositionApi.save(data.position).catch(err => {
+            console.error('Failed to save ship position to DB:', err);
+          });
+        }
 
         saveToStorage(this);
 
@@ -248,6 +255,26 @@ export const useShipStore = defineStore('ship', {
       movesApi.clearAll().catch(err => {
         console.error('Failed to clear move history from DB:', err);
       });
+    },
+
+    async loadPositionFromDB() {
+      try {
+        const response = await shipPositionApi.get();
+        if (response.data && response.data.x !== undefined) {
+          this.position = {
+            x: response.data.x,
+            y: response.data.y,
+            type: response.data.type,
+            zone: response.data.zone
+          };
+          saveToStorage(this);
+        }
+      } catch (err) {
+        // 404 = pas encore de position enregistrée, pas une erreur critique
+        if (err.response?.status !== 404) {
+          console.error('Failed to load ship position from DB:', err);
+        }
+      }
     },
 
     resetState() {
