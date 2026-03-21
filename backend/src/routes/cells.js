@@ -1,5 +1,6 @@
 import express from 'express';
 import Cell from '../models/Cell.js';
+import { broadcast } from '../ws.js';
 
 const router = express.Router();
 
@@ -76,6 +77,8 @@ router.post('/bulk', async (req, res) => {
     }));
 
     const result = await Cell.bulkWrite(operations);
+
+    broadcast('cells:update', { gameId, cells });
 
     res.json({
       success: true,
