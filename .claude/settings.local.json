@@ -3,7 +3,13 @@
     "allow": [
       "Bash(find /c/Users/zaki7/Documents/24h/KUZ-24HDUCODE2026 -type f -name *migration* -o -name *seed* -o -name *script*)",
       "Bash(npm install:*)",
-      "Bash(npx vite:*)"
+      "Bash(npx vite:*)",
+      "Bash(find /c/Users/zaki7/Documents/24h/KUZ-24HDUCODE2026 -maxdepth 2 -name .env* -o -name vite.config* -o -name README*)",
+      "Bash(python -c \"import requests; import pymongo; print\\(''OK''\\)\")",
+      "Bash(pip install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(python -m pip install requests pymongo)",
+      "Bash(python3 -m pip install requests pymongo)"
     ]
   }
 }
