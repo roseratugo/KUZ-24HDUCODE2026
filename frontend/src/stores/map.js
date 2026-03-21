@@ -177,6 +177,22 @@ export const useMapStore = defineStore('map', {
       }
     },
 
+    async syncIslandStates(discoveredIslands) {
+      for (const { island, islandState } of discoveredIslands) {
+        const islandId = island.id;
+        const localIsland = this.islands.get(islandId);
+        if (localIsland && localIsland.state !== islandState) {
+          localIsland.state = islandState;
+          try {
+            await islandsApi.updateState(islandId, islandState);
+            console.log(`Island ${island.name} (${islandId}) state updated to ${islandState}`);
+          } catch (err) {
+            console.error(`Failed to update island ${islandId} state:`, err);
+          }
+        }
+      }
+    },
+
     async fetchStats() {
       try {
         const res = await statsApi.get();
