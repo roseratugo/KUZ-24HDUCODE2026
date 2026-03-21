@@ -71,6 +71,33 @@ export const movesApi = {
   clearAll: () => mapClient.delete(`/moves/${GAME_ID}`)
 };
 
+export const shipPositionApi = {
+  get: () => mapClient.get(`/ship-position/${GAME_ID}`),
+  save: (position) => mapClient.put(`/ship-position/${GAME_ID}`, position)
+};
+
+export const pricesApi = {
+  getAll: () => mapClient.get(`/prices/${GAME_ID}`),
+
+  getByResource: (resourceType, limit = 100) =>
+    mapClient.get(`/prices/${GAME_ID}/${resourceType}?limit=${limit}`),
+
+  getLatest: () => mapClient.get(`/prices/${GAME_ID}/latest/all`),
+
+  save: (resourceType, data) => mapClient.post('/prices', {
+    gameId: GAME_ID,
+    resourceType,
+    ...data
+  }),
+
+  saveBulk: (snapshots) => mapClient.post('/prices/bulk', {
+    gameId: GAME_ID,
+    snapshots
+  }),
+
+  clearAll: () => mapClient.delete(`/prices/${GAME_ID}`)
+};
+
 export const statsApi = {
   get: () => mapClient.get('/stats'),
   health: () => mapClient.get('/health')

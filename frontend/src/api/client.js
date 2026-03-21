@@ -91,4 +91,13 @@ export const registrationApi = {
   })
 };
 
+export const marketplaceApi = {
+  getOffers: () => apiClient.get('/marketplace/offers'),
+  getOffer: (id) => apiClient.get(`/marketplace/offers/${id}`),
+  createOffer: (data) => apiClient.post('/marketplace/offers', data),
+  updateOffer: (id, data) => apiClient.patch(`/marketplace/offers/${id}`, data),
+  deleteOffer: (id) => apiClient.delete(`/marketplace/offers/${id}`),
+  purchase: (offerId, quantity) => apiClient.post('/marketplace/purchases', { offerId, quantity })
+};
+
 export default apiClient;

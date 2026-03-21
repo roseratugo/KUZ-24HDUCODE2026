@@ -62,6 +62,9 @@ const getCellClass = (item) => {
     classes.push('unknown');
   } else {
     classes.push(item.cell.type.toLowerCase());
+    if (item.cell.zone !== undefined && item.cell.zone !== null) {
+      classes.push(`zone-${item.cell.zone}`);
+    }
     if (item.cell.state) {
       classes.push(`state-${item.cell.state.toLowerCase()}`);
     }
@@ -254,8 +257,16 @@ onMounted(async () => {
 
     <div class="legend">
       <div class="legend-item">
-        <span class="legend-color sea"></span>
-        <span>Mer</span>
+        <span class="legend-color sea zone-1"></span>
+        <span>Mer Z1</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-color sea zone-2"></span>
+        <span>Mer Z2</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-color sea zone-3"></span>
+        <span>Mer Z3</span>
       </div>
       <div class="legend-item">
         <span class="legend-color sand"></span>
@@ -452,6 +463,27 @@ h2 {
   background: #1e40af;
 }
 
+/* Zones SEA : plus la zone est haute, plus c'est foncé */
+.cell.sea.zone-1 {
+  background: #7dd3fc; /* bleu très clair */
+}
+
+.cell.sea.zone-2 {
+  background: #2563eb; /* bleu moyen */
+}
+
+.cell.sea.zone-3 {
+  background: #1d4ed8; /* bleu soutenu */
+}
+
+.cell.sea.zone-4 {
+  background: #1e3a8a; /* bleu foncé */
+}
+
+.cell.sea.zone-5 {
+  background: #172554; /* bleu très foncé */
+}
+
 .cell.sand {
   background: #d97706;
 }
@@ -531,6 +563,26 @@ h2 {
 
 .legend-color.sea {
   background: #1e40af;
+}
+
+.legend-color.sea.zone-1 {
+  background: #7dd3fc;
+}
+
+.legend-color.sea.zone-2 {
+  background: #2563eb;
+}
+
+.legend-color.sea.zone-3 {
+  background: #1d4ed8;
+}
+
+.legend-color.sea.zone-4 {
+  background: #1e3a8a;
+}
+
+.legend-color.sea.zone-5 {
+  background: #172554;
 }
 
 .legend-color.sand {
