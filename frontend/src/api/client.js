@@ -69,7 +69,14 @@ export const playerApi = {
 
 export const shipApi = {
   build: () => apiClient.post('/ship/build'),
-  move: (direction) => apiClient.post('/ship/move', { direction })
+  move: (direction) => apiClient.post('/ship/move', { direction }),
+  nextLevel: () => apiClient.get('/ship/next-level'),
+  upgrade: (level) => apiClient.put('/ship/upgrade', { level })
+};
+
+export const storageApi = {
+  nextLevel: () => apiClient.get('/storage/next-level'),
+  upgrade: () => apiClient.put('/storage/upgrade')
 };
 
 export const theftsApi = {
