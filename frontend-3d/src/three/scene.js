@@ -191,14 +191,21 @@ export class GameScene {
   animate() {
     requestAnimationFrame(() => this.animate());
 
-    const time = this.clock.getElapsedTime();
+    const delta = this.clock.getDelta();
+    this.elapsedTime = (this.elapsedTime || 0) + delta;
+    const time = this.elapsedTime;
 
     // Water animation
     this.water.material.uniforms['time'].value = time;
 
     if (this.boat) {
-      // Smooth boat movement
-      this.boat.position.lerp(this.targetBoatPos, 0.05);
+      const moveSpeed = 1 - Math.pow(0.05, delta); // framerate-independent smoothing
+      const rotSpeed = 1 - Math.pow(0.08, delta);
+      const camSpeed = 1 - Math.pow(0.1, delta);
+
+      // Smooth boat movement (slow glide)
+      this.boat.position.x = THREE.MathUtils.lerp(this.boat.position.x, this.targetBoatPos.x, moveSpeed);
+      this.boat.position.z = THREE.MathUtils.lerp(this.boat.position.z, this.targetBoatPos.z, moveSpeed);
 
       // Boat bobbing
       this.boat.position.y = 9 + Math.sin(time * 1.5) * 0.3;
@@ -214,11 +221,11 @@ export class GameScene {
       this.boat.rotation.y = THREE.MathUtils.lerp(
         this.boat.rotation.y,
         this.lastBoatAngle,
-        0.03
+        rotSpeed
       );
 
-      // Camera: only update orbit target to follow boat, don't force camera position
-      this.controls.target.lerp(this.boat.position, 0.05);
+      // Camera: smoothly follow boat
+      this.controls.target.lerp(this.boat.position, camSpeed);
     }
 
     this.controls.update();
