@@ -66,6 +66,19 @@ services:
     depends_on:
       - backend
 
+  frontend-3d:
+    build:
+      context: ./frontend-3d
+      dockerfile: Dockerfile
+    container_name: kuz-frontend-3d
+    restart: unless-stopped
+    ports:
+      - "3002:80"
+    networks:
+      - kuz-network
+    depends_on:
+      - backend
+
 networks:
   kuz-network:
     driver: bridge
