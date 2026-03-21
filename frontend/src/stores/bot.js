@@ -1,9 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, markRaw } from 'vue';
 import { ExplorationBot } from '../bots/ExplorationBot';
-import { useShipStore } from './ship';
-import { useMapStore } from './map';
-import { usePlayerStore } from './player';
 
 export const useBotStore = defineStore('bot', () => {
   const botInstances = ref({});
@@ -37,22 +34,18 @@ export const useBotStore = defineStore('bot', () => {
 
     if (bot.isActive) {
       const instance = botInstances.value[bot.id];
-      if (instance) instance.stop();
+      if (instance) await instance.stop();
       delete botInstances.value[bot.id];
       bot.isActive = false;
       bot.status = 'stopped';
     } else {
-      const shipStore = useShipStore();
-      const mapStore = useMapStore();
-      const playerStore = usePlayerStore();
-
       const instance = new ExplorationBot();
-      botLogs.value[bot.id] = botLogs.value[bot.id] || [];
+      if (!botLogs.value[bot.id]) botLogs.value[bot.id] = [];
 
       instance.onLog = (entry) => {
-        botLogs.value[bot.id].push(entry);
-        if (botLogs.value[bot.id].length > 100) {
-          botLogs.value[bot.id] = botLogs.value[bot.id].slice(-100);
+        botLogs.value[bot.id] = [...botLogs.value[bot.id], entry];
+        if (botLogs.value[bot.id].length > 200) {
+          botLogs.value[bot.id] = botLogs.value[bot.id].slice(-200);
         }
       };
 
@@ -65,26 +58,12 @@ export const useBotStore = defineStore('bot', () => {
       bot.isActive = true;
       bot.status = 'running';
 
-      instance.start(shipStore, mapStore, playerStore).catch(err => {
-        console.error('Bot error:', err);
-        bot.isActive = false;
-        bot.status = 'stopped';
-      });
+      await instance.start();
     }
   };
 
-  const pauseBot = (id) => {
-    const bot = bots.value.find(b => b.id === id);
-    const instance = botInstances.value[id];
-    if (instance && bot) { instance.pause(); bot.status = 'paused'; }
-  };
-
-  const resumeBot = (id) => {
-    const bot = bots.value.find(b => b.id === id);
-    const instance = botInstances.value[id];
-    if (instance && bot) { instance.resume(); bot.status = 'running'; }
-  };
-
+  const pauseBot = () => {};
+  const resumeBot = () => {};
   const stopAllBots = () => bots.value.forEach(b => { if (b.isActive) toggleBot(b.id); });
 
   return {
