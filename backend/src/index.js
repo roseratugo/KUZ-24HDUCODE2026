@@ -7,6 +7,7 @@ import islandRoutes from './routes/islands.js';
 import moveRoutes from './routes/moves.js';
 import shipPositionRoutes from './routes/shipPosition.js';
 import priceHistoryRoutes from './routes/priceHistory.js';
+import botRoutes from './routes/bot.js';
 import { setupWebSocket } from './ws.js';
 
 const app = express();
@@ -26,6 +27,7 @@ app.use('/api/islands', islandRoutes);
 app.use('/api/moves', moveRoutes);
 app.use('/api/ship-position', shipPositionRoutes);
 app.use('/api/prices', priceHistoryRoutes);
+app.use('/api/bot', botRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
