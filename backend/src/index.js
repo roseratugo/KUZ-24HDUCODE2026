@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import cellRoutes from './routes/cells.js';
 import islandRoutes from './routes/islands.js';
 import moveRoutes from './routes/moves.js';
+import shipPositionRoutes from './routes/shipPosition.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -19,6 +20,7 @@ mongoose.connect(MONGODB_URI)
 app.use('/api/cells', cellRoutes);
 app.use('/api/islands', islandRoutes);
 app.use('/api/moves', moveRoutes);
+app.use('/api/ship-position', shipPositionRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

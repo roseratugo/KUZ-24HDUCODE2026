@@ -54,6 +54,7 @@ const toggleAutoRefresh = () => {
 };
 
 onMounted(() => {
+  shipStore.loadPositionFromDB();
   refresh();
   startAutoRefresh();
 });

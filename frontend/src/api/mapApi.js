@@ -71,6 +71,11 @@ export const movesApi = {
   clearAll: () => mapClient.delete(`/moves/${GAME_ID}`)
 };
 
+export const shipPositionApi = {
+  get: () => mapClient.get(`/ship-position/${GAME_ID}`),
+  save: (position) => mapClient.put(`/ship-position/${GAME_ID}`, position)
+};
+
 export const statsApi = {
   get: () => mapClient.get('/stats'),
   health: () => mapClient.get('/health')
