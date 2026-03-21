@@ -111,6 +111,7 @@ export const useMapStore = defineStore('map', {
           islandId: island.id,
           name: island.name,
           bonusQuotient: island.bonusQuotient,
+          state: 'DISCOVERED',
           cells: []
         });
 
