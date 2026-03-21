@@ -175,7 +175,7 @@ export class GameScene {
       const dir = this.targetBoatPos.clone().sub(this.boat.position);
       dir.y = 0;
       if (dir.lengthSq() > 0.5) {
-        this.lastBoatAngle = Math.atan2(dir.x, dir.z);
+        this.lastBoatAngle = Math.atan2(dir.x, dir.z) + Math.PI / 2;
       }
       this.boat.rotation.y = THREE.MathUtils.lerp(
         this.boat.rotation.y,
