@@ -189,9 +189,6 @@ onMounted(async () => {
         <button class="control-btn reload" @click="reloadMap" title="Recharger depuis DB">
           🔄
         </button>
-        <button class="control-btn clear" @click="clearMap" title="Effacer la carte">
-          🗑️
-        </button>
       </div>
     </div>
 
