@@ -126,7 +126,7 @@ const onDrag = (e) => {
   if (Math.abs(dy) > sensitivity) {
     mapStore.setViewCenter(
       viewCenter.value.x,
-      viewCenter.value.y + Math.sign(dy)
+      viewCenter.value.y - Math.sign(dy)
     );
     dragStart.value.y = e.clientY;
   }
