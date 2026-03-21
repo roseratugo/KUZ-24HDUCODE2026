@@ -91,6 +91,7 @@ export class GameScene {
 
     // Target position for smooth movement
     this.targetBoatPos = new THREE.Vector3(0, 9, 0);
+    this.lastBoatAngle = 0;
 
     // Islands
     this.islandManager = new IslandManager(this.scene, this.CELL_SIZE);
@@ -170,21 +171,19 @@ export class GameScene {
       this.boat.rotation.z = Math.sin(time * 0.8) * 0.03;
       this.boat.rotation.x = Math.sin(time * 1.2) * 0.02;
 
-      // Rotate boat towards movement direction
+      // Orient boat towards movement direction
       const dir = this.targetBoatPos.clone().sub(this.boat.position);
-      if (dir.lengthSq() > 1) {
-        const angle = Math.atan2(dir.x, dir.z);
-        this.boat.rotation.y = THREE.MathUtils.lerp(
-          this.boat.rotation.y,
-          angle,
-          0.05
-        );
+      dir.y = 0;
+      if (dir.lengthSq() > 0.5) {
+        this.lastBoatAngle = Math.atan2(dir.x, dir.z);
       }
+      this.boat.rotation.y = THREE.MathUtils.lerp(
+        this.boat.rotation.y,
+        this.lastBoatAngle,
+        0.03
+      );
 
-      // Camera follows boat
-      const camOffset = new THREE.Vector3(25, 30, 50);
-      const targetCamPos = this.boat.position.clone().add(camOffset);
-      this.camera.position.lerp(targetCamPos, 0.03);
+      // Camera: only update orbit target to follow boat, don't force camera position
       this.controls.target.lerp(this.boat.position, 0.05);
     }
 
