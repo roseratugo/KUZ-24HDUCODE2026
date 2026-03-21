@@ -11,6 +11,7 @@ import RequestHistory from '../components/RequestHistory.vue';
 import TheftsPanel from '../components/TheftsPanel.vue';
 import ShipUpgradePanel from '../components/ShipUpgradePanel.vue';
 import StorageUpgradePanel from '../components/StorageUpgradePanel.vue';
+import Marketplace from '../components/Marketplace.vue';
 
 const playerStore = usePlayerStore();
 const shipStore = useShipStore();
@@ -54,6 +55,7 @@ const toggleAutoRefresh = () => {
 };
 
 onMounted(() => {
+  shipStore.loadPositionFromDB();
   refresh();
   startAutoRefresh();
 });
@@ -121,15 +123,21 @@ onUnmounted(() => {
         >
           Historique Requetes
         </button>
+        <button
+          :class="['tab', { active: activeTab === 'marketplace' }]"
+          @click="activeTab = 'marketplace'"
+        >
+          Marketplace
+        </button>
       </div>
 
-      <div class="grid-layout">
-        <div class="col-left">
+      <div :class="['grid-layout', { 'marketplace-mode': activeTab === 'marketplace' }]">
+        <div v-show="activeTab !== 'marketplace'" class="col-left">
           <PlayerInfo />
           <ResourcesDisplay />
           <IslandsDisplay />
         </div>
-        <div class="col-center">
+        <div :class="['col-center', { 'col-full': activeTab === 'marketplace' }]">
           <div v-show="activeTab === 'map'" class="tab-content">
             <WorldMap />
           </div>
@@ -145,8 +153,11 @@ onUnmounted(() => {
           <div v-show="activeTab === 'history'" class="tab-content">
             <RequestHistory />
           </div>
+          <div v-show="activeTab === 'marketplace'" class="tab-content">
+            <Marketplace />
+          </div>
         </div>
-        <div class="col-right">
+        <div v-show="activeTab !== 'marketplace'" class="col-right">
           <ShipControl />
         </div>
       </div>
@@ -293,6 +304,14 @@ onUnmounted(() => {
 
 .col-center {
   min-height: 500px;
+}
+
+.col-center.col-full {
+  grid-column: 1 / -1;
+}
+
+.grid-layout.marketplace-mode {
+  grid-template-columns: 1fr;
 }
 
 .tab-content {
