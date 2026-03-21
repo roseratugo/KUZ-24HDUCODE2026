@@ -338,8 +338,10 @@ const onFullscreenChange = () => {
   nextTick(resizeCanvas);
 };
 
-const reloadMap = () => {
-  mapStore.loadFromDB().then(draw);
+const reloadMap = async () => {
+  await mapStore.loadFromDB();
+  await nextTick();
+  resizeCanvas();
 };
 
 const formatTime = (isoString) => {
