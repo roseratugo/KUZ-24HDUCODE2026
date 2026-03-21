@@ -8,9 +8,13 @@ export class IslandManager {
   constructor(scene, cellSize) {
     this.scene = scene;
     this.cellSize = cellSize;
-    this.islandMeshes = new Map();
+    this.islandMeshes = new Map(); // clusterId -> THREE.Group
     this.processedCells = new Set();
-    this.islandCells = new Map();
+    this.sandCells = new Map(); // "x,y" -> cell (all SAND cells)
+    this.clusterMap = new Map(); // "x,y" -> clusterId
+    this.clusters = new Map(); // clusterId -> { cells: [], names: Set }
+    this.nextClusterId = 0;
+    this.rebuildTimer = null;
   }
 
   addCell(cell) {
@@ -18,14 +22,91 @@ export class IslandManager {
     if (this.processedCells.has(key)) return;
     this.processedCells.add(key);
 
-    if (cell.island) {
-      const islandId = cell.island.id || cell.island.name;
-      if (!this.islandCells.has(islandId)) {
-        this.islandCells.set(islandId, { name: cell.island.name, cells: [] });
+    if (cell.type !== 'SAND' && !cell.island) return;
+
+    this.sandCells.set(key, cell);
+
+    // Find adjacent clusters
+    const neighbors = [
+      `${cell.x - 1},${cell.y}`, `${cell.x + 1},${cell.y}`,
+      `${cell.x},${cell.y - 1}`, `${cell.x},${cell.y + 1}`,
+      `${cell.x - 1},${cell.y - 1}`, `${cell.x + 1},${cell.y - 1}`,
+      `${cell.x - 1},${cell.y + 1}`, `${cell.x + 1},${cell.y + 1}`
+    ];
+
+    const adjacentClusterIds = new Set();
+    for (const nk of neighbors) {
+      if (this.clusterMap.has(nk)) {
+        adjacentClusterIds.add(this.clusterMap.get(nk));
       }
-      this.islandCells.get(islandId).cells.push(cell);
-      this.rebuildIsland(islandId);
     }
+
+    if (adjacentClusterIds.size === 0) {
+      // New cluster
+      const id = this.nextClusterId++;
+      this.clusterMap.set(key, id);
+      this.clusters.set(id, {
+        cells: [cell],
+        names: new Set(cell.island ? [cell.island.name] : [])
+      });
+      this.scheduleRebuild(id);
+    } else if (adjacentClusterIds.size === 1) {
+      // Join existing cluster
+      const id = adjacentClusterIds.values().next().value;
+      this.clusterMap.set(key, id);
+      this.clusters.get(id).cells.push(cell);
+      if (cell.island) this.clusters.get(id).names.add(cell.island.name);
+      this.scheduleRebuild(id);
+    } else {
+      // Merge multiple clusters
+      const ids = [...adjacentClusterIds];
+      const mainId = ids[0];
+      const mainCluster = this.clusters.get(mainId);
+
+      for (let i = 1; i < ids.length; i++) {
+        const mergeId = ids[i];
+        const mergeCluster = this.clusters.get(mergeId);
+        if (!mergeCluster) continue;
+
+        // Move all cells to main cluster
+        for (const c of mergeCluster.cells) {
+          mainCluster.cells.push(c);
+          this.clusterMap.set(`${c.x},${c.y}`, mainId);
+        }
+        for (const n of mergeCluster.names) mainCluster.names.add(n);
+
+        // Remove old mesh
+        if (this.islandMeshes.has(mergeId)) {
+          const old = this.islandMeshes.get(mergeId);
+          this.scene.remove(old);
+          old.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+              else child.material.dispose();
+            }
+          });
+          this.islandMeshes.delete(mergeId);
+        }
+        this.clusters.delete(mergeId);
+      }
+
+      // Add new cell
+      this.clusterMap.set(key, mainId);
+      mainCluster.cells.push(cell);
+      if (cell.island) mainCluster.names.add(cell.island.name);
+      this.scheduleRebuild(mainId);
+    }
+  }
+
+  scheduleRebuild(clusterId) {
+    // Debounce rebuilds — wait 200ms for more cells to arrive
+    if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = setTimeout(() => {
+      for (const [id] of this.clusters) {
+        this.rebuildCluster(id);
+      }
+    }, 200);
   }
 
   getCoastDist(px, pz, worldRadius, seed) {
@@ -63,9 +144,9 @@ export class IslandManager {
     return height;
   }
 
-  rebuildIsland(islandId) {
-    if (this.islandMeshes.has(islandId)) {
-      const old = this.islandMeshes.get(islandId);
+  rebuildCluster(clusterId) {
+    if (this.islandMeshes.has(clusterId)) {
+      const old = this.islandMeshes.get(clusterId);
       this.scene.remove(old);
       old.traverse(child => {
         if (child.geometry) child.geometry.dispose();
@@ -76,7 +157,7 @@ export class IslandManager {
       });
     }
 
-    const data = this.islandCells.get(islandId);
+    const data = this.clusters.get(clusterId);
     if (!data || data.cells.length === 0) return;
 
     const group = new THREE.Group();
@@ -204,7 +285,7 @@ export class IslandManager {
 
     group.position.set(worldCX, 0, worldCZ);
     this.scene.add(group);
-    this.islandMeshes.set(islandId, group);
+    this.islandMeshes.set(clusterId, group);
   }
 
   addPalmTrees(group, radius, wx, wz, seed) {
