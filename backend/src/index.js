@@ -5,6 +5,7 @@ import cellRoutes from './routes/cells.js';
 import islandRoutes from './routes/islands.js';
 import moveRoutes from './routes/moves.js';
 import shipPositionRoutes from './routes/shipPosition.js';
+import priceHistoryRoutes from './routes/priceHistory.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -21,6 +22,7 @@ app.use('/api/cells', cellRoutes);
 app.use('/api/islands', islandRoutes);
 app.use('/api/moves', moveRoutes);
 app.use('/api/ship-position', shipPositionRoutes);
+app.use('/api/prices', priceHistoryRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
