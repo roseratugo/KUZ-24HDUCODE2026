@@ -26,7 +26,7 @@ export class GameScene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.5;
+    this.renderer.toneMappingExposure = 0.8;
     this.container.appendChild(this.renderer.domElement);
 
     // Scene
@@ -82,10 +82,10 @@ export class GameScene {
     this.updateSun();
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0x404040, 1);
+    const ambientLight = new THREE.AmbientLight(0x6688aa, 1.5);
     this.scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    const directionalLight = new THREE.DirectionalLight(0xfff4e0, 2.5);
     directionalLight.position.set(50, 100, 50);
     this.scene.add(directionalLight);
 
@@ -117,7 +117,7 @@ export class GameScene {
   }
 
   updateSun() {
-    const phi = THREE.MathUtils.degToRad(88);
+    const phi = THREE.MathUtils.degToRad(60);
     const theta = THREE.MathUtils.degToRad(180);
 
     this.sun.setFromSphericalCoords(1, phi, theta);
