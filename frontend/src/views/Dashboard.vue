@@ -9,6 +9,8 @@ import ShipControl from '../components/ShipControl.vue';
 import WorldMap from '../components/WorldMap.vue';
 import RequestHistory from '../components/RequestHistory.vue';
 import TheftsPanel from '../components/TheftsPanel.vue';
+import ShipUpgradePanel from '../components/ShipUpgradePanel.vue';
+import StorageUpgradePanel from '../components/StorageUpgradePanel.vue';
 
 const playerStore = usePlayerStore();
 const shipStore = useShipStore();
@@ -96,6 +98,18 @@ onUnmounted(() => {
           Carte & Navigation
         </button>
         <button
+          :class="['tab', { active: activeTab === 'ship-upgrade' }]"
+          @click="activeTab = 'ship-upgrade'"
+        >
+          Bateau
+        </button>
+        <button
+          :class="['tab', { active: activeTab === 'storage-upgrade' }]"
+          @click="activeTab = 'storage-upgrade'"
+        >
+          Entrepot
+        </button>
+        <button
           :class="['tab', { active: activeTab === 'thefts' }]"
           @click="activeTab = 'thefts'"
         >
@@ -118,6 +132,12 @@ onUnmounted(() => {
         <div class="col-center">
           <div v-show="activeTab === 'map'" class="tab-content">
             <WorldMap />
+          </div>
+          <div v-show="activeTab === 'ship-upgrade'" class="tab-content">
+            <ShipUpgradePanel />
+          </div>
+          <div v-show="activeTab === 'storage-upgrade'" class="tab-content">
+            <StorageUpgradePanel />
           </div>
           <div v-show="activeTab === 'thefts'" class="tab-content">
             <TheftsPanel />
