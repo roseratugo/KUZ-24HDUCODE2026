@@ -295,7 +295,7 @@ const onMouseMove = (e) => {
   const z = zoomLevel.value;
   const cellPx = CELL_SIZE * z;
   const offsetX = canvas.width / 2 - camera.value.x * z;
-  const offsetY = canvas.height / 2 + camera.value.y * z;
+  const offsetY = canvas.height / 2 - camera.value.y * z;
 
   const cellX = Math.floor((mx - offsetX) / cellPx);
   const cellY = Math.floor((my - offsetY) / cellPx);
