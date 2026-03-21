@@ -7,8 +7,6 @@ services:
       MONGO_INITDB_DATABASE: kuz3026
     volumes:
       - mongodb_data:/data/db
-    ports:
-      - "27017:27017"
     networks:
       - kuz-network
     healthcheck:
@@ -27,8 +25,6 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - MONGODB_URI=mongodb://mongodb:27017/kuz3026
-    ports:
-      - "3001:3001"
     networks:
       - kuz-network
     depends_on:
@@ -40,20 +36,21 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_BACKEND_URL=http://localhost:3001
+        - VITE_BACKEND_URL=
         - VITE_GAME_ID=kuz-team
     container_name: kuz-frontend
     restart: unless-stopped
-    ports:
-      - "3000:80"
     networks:
       - kuz-network
+      - proxy_net
     depends_on:
       - backend
 
 networks:
   kuz-network:
     driver: bridge
+  proxy_net:
+    external: true
 
 volumes:
   mongodb_data:
