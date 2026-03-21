@@ -177,22 +177,6 @@ export const useMapStore = defineStore('map', {
       }
     },
 
-    async clearMap() {
-      try {
-        await Promise.all([
-          cellsApi.clearAll(),
-          islandsApi.clearAll()
-        ]);
-        this.cells.clear();
-        this.islands.clear();
-        console.log('Map cleared from DB');
-      } catch (err) {
-        console.error('Failed to clear map from DB:', err);
-        this.cells.clear();
-        this.islands.clear();
-      }
-    },
-
     async fetchStats() {
       try {
         const res = await statsApi.get();
