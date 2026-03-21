@@ -4,28 +4,29 @@ import { createNoise2D } from 'simplex-noise';
 const noise2D = createNoise2D();
 const noise2D_2 = createNoise2D();
 
+// Island types by cell count
+// TINY: 1-2 cells (just a rock/sandbar)
+// SMALL: 3-15 cells (small island)
+// MEDIUM: 16-49 cells (medium island)
+// LARGE: 50+ cells (big island)
+
 export class IslandManager {
   constructor(scene, cellSize) {
     this.scene = scene;
     this.cellSize = cellSize;
-    this.islandMeshes = new Map(); // clusterId -> THREE.Group
-    this.sandCells = new Map(); // "x,y" -> cell
+    this.islandMeshes = new Map();
+    this.sandCells = new Map();
     this.dirty = false;
     this.rebuildTimer = null;
-    this.lastClusterCount = 0;
+    this.lastHash = '';
   }
 
   setShipPosition(sx, sy, radius) {
-    this.shipX = sx;
-    this.shipY = sy;
-    this.renderRadius = radius;
-
-    // Remove cells outside render radius
     let removed = false;
     for (const [key, cell] of this.sandCells) {
       const dx = cell.x - sx;
       const dy = cell.y - sy;
-      if (dx * dx + dy * dy > radius * radius * 1.3) { // 30% hysteresis
+      if (dx * dx + dy * dy > radius * radius * 1.3) {
         this.sandCells.delete(key);
         removed = true;
       }
@@ -40,7 +41,6 @@ export class IslandManager {
     if (cell.type !== 'SAND' && !cell.island) return;
     const key = `${cell.x},${cell.y}`;
     if (this.sandCells.has(key)) return;
-
     this.sandCells.set(key, cell);
     this.dirty = true;
     this.scheduleRebuild();
@@ -55,15 +55,12 @@ export class IslandManager {
     }, 500);
   }
 
-  // Flood-fill to find connected clusters of SAND cells
   findClusters() {
     const visited = new Set();
     const clusters = [];
 
-    for (const [key, cell] of this.sandCells) {
+    for (const [key] of this.sandCells) {
       if (visited.has(key)) continue;
-
-      // BFS flood fill
       const cluster = [];
       const queue = [key];
       visited.add(key);
@@ -74,43 +71,30 @@ export class IslandManager {
         if (c) cluster.push(c);
 
         const [cx, cy] = k.split(',').map(Number);
-        const neighbors = [
-          `${cx - 1},${cy}`, `${cx + 1},${cy}`,
-          `${cx},${cy - 1}`, `${cx},${cy + 1}`,
-          `${cx - 1},${cy - 1}`, `${cx + 1},${cy - 1}`,
-          `${cx - 1},${cy + 1}`, `${cx + 1},${cy + 1}`
-        ];
-
-        for (const nk of neighbors) {
+        for (const nk of [
+          `${cx-1},${cy}`, `${cx+1},${cy}`, `${cx},${cy-1}`, `${cx},${cy+1}`,
+          `${cx-1},${cy-1}`, `${cx+1},${cy-1}`, `${cx-1},${cy+1}`, `${cx+1},${cy+1}`
+        ]) {
           if (!visited.has(nk) && this.sandCells.has(nk)) {
             visited.add(nk);
             queue.push(nk);
           }
         }
       }
-
-      if (cluster.length > 0) {
-        clusters.push(cluster);
-      }
+      if (cluster.length > 0) clusters.push(cluster);
     }
-
     return clusters;
   }
 
   rebuildAll() {
     const clusters = this.findClusters();
 
-    // Skip if same number of clusters (no structural change)
-    if (clusters.length === this.lastClusterCount) {
-      // Check if any cluster grew
-      let totalCells = 0;
-      for (const c of clusters) totalCells += c.length;
-      let oldTotal = 0;
-      for (const [, mesh] of this.islandMeshes) oldTotal += (mesh.userData.cellCount || 0);
-      if (totalCells === oldTotal) return;
-    }
+    // Quick hash to avoid unnecessary rebuilds
+    const hash = clusters.map(c => c.length).sort().join(',');
+    if (hash === this.lastHash) return;
+    this.lastHash = hash;
 
-    // Clear all existing meshes
+    // Clear all
     for (const [, mesh] of this.islandMeshes) {
       this.scene.remove(mesh);
       mesh.traverse(child => {
@@ -123,43 +107,241 @@ export class IslandManager {
     }
     this.islandMeshes.clear();
 
-    // Build each cluster
     clusters.forEach((cells, i) => {
-      this.rebuildCluster(i, cells);
+      const size = cells.length;
+      if (size <= 2) {
+        this.buildTiny(i, cells);
+      } else if (size <= 15) {
+        this.buildSmall(i, cells);
+      } else if (size < 50) {
+        this.buildMedium(i, cells);
+      } else {
+        this.buildLarge(i, cells);
+      }
     });
 
-    this.lastClusterCount = clusters.length;
-    console.log(`Built ${clusters.length} island(s) from ${this.sandCells.size} sand cells`);
+    console.log(`Built ${clusters.length} island(s): ${this.sandCells.size} cells`);
   }
 
-  getCoastDist(px, pz, worldRadius, seed) {
+  getCenter(cells) {
+    const xs = cells.map(c => c.x);
+    const ys = cells.map(c => c.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const spanX = Math.max(...xs) - Math.min(...xs) + 1;
+    const spanY = Math.max(...ys) - Math.min(...ys) + 1;
+    const radius = Math.max(spanX, spanY) / 2 + 1;
+    return {
+      cx, cy,
+      wx: cx * this.cellSize,
+      wz: -cy * this.cellSize,
+      radius,
+      worldRadius: radius * this.cellSize,
+      seed: Math.abs(Math.round(cx * 137 + cy * 311)) % 10000
+    };
+  }
+
+  // ===== TINY: 1-2 cells — just a rock/sandbar =====
+  buildTiny(id, cells) {
+    const { wx, wz, seed } = this.getCenter(cells);
+    const group = new THREE.Group();
+
+    // Simple rock/sandbar
+    const geo = new THREE.DodecahedronGeometry(this.cellSize * 0.6, 1);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, pos.getY(i) * 0.3 + Math.abs(pos.getY(i)) * 0.1);
+      pos.setX(i, pos.getX(i) * (0.8 + Math.random() * 0.4));
+      pos.setZ(i, pos.getZ(i) * (0.8 + Math.random() * 0.4));
+    }
+    geo.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: seed % 2 === 0 ? 0xc4a060 : 0x6b6b5e,
+      roughness: 0.95
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 0.5;
+    group.add(mesh);
+
+    group.position.set(wx, 0, wz);
+    this.scene.add(group);
+    this.islandMeshes.set(id, group);
+  }
+
+  // ===== SMALL: 3-15 cells — small island with few trees =====
+  buildSmall(id, cells) {
+    const { wx, wz, worldRadius, seed } = this.getCenter(cells);
+    const group = new THREE.Group();
+
+    const segments = 24;
+    const geo = new THREE.PlaneGeometry(worldRadius * 2.2, worldRadius * 2.2, segments, segments);
+    geo.rotateX(-Math.PI / 2);
+
+    this.applyTerrainHeight(geo, wx, wz, worldRadius, seed, 3);
+    this.applyVertexColors(geo);
+    this.cullUnderwaterFaces(geo);
+
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.85, metalness: 0.02, side: THREE.DoubleSide
+    }));
+    group.add(mesh);
+
+    // 1-3 palm trees
+    const treeCount = 1 + (seed % 3);
+    for (let i = 0; i < treeCount; i++) {
+      const angle = (i / treeCount) * Math.PI * 2 + seed;
+      const dist = worldRadius * 0.2;
+      const tx = Math.cos(angle) * dist;
+      const tz = Math.sin(angle) * dist;
+      const h = this.sampleHeight(tx, tz, wx, wz, worldRadius, seed, 3);
+      if (h > 1) {
+        const tree = this.createPalmTree(seed + i);
+        tree.position.set(tx, h - 0.2, tz);
+        tree.scale.setScalar(1.8 + (seed % 3) * 0.3);
+        group.add(tree);
+      }
+    }
+
+    group.position.set(wx, 0, wz);
+    this.scene.add(group);
+    this.islandMeshes.set(id, group);
+  }
+
+  // ===== MEDIUM: 16-49 cells — proper island =====
+  buildMedium(id, cells) {
+    const { wx, wz, worldRadius, seed } = this.getCenter(cells);
+    const group = new THREE.Group();
+
+    const segments = 40;
+    const geo = new THREE.PlaneGeometry(worldRadius * 2.4, worldRadius * 2.4, segments, segments);
+    geo.rotateX(-Math.PI / 2);
+
+    this.applyTerrainHeight(geo, wx, wz, worldRadius, seed, 5);
+    this.applyVertexColors(geo);
+    this.cullUnderwaterFaces(geo);
+
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.85, metalness: 0.02, side: THREE.DoubleSide
+    }));
+    group.add(mesh);
+
+    // Palm trees
+    const treeCount = 4 + (seed % 5);
+    for (let i = 0; i < treeCount; i++) {
+      const angle = ((i * 137.508 + seed) % 360) * Math.PI / 180;
+      const dist = worldRadius * (0.15 + Math.abs(noise2D(i * 0.5, seed * 0.01)) * 0.45);
+      const tx = Math.cos(angle) * dist;
+      const tz = Math.sin(angle) * dist;
+      const h = this.sampleHeight(tx, tz, wx, wz, worldRadius, seed, 5);
+      if (h > 1.5) {
+        const tree = this.createPalmTree(seed + i);
+        tree.position.set(tx, h - 0.3, tz);
+        tree.scale.setScalar(2.0 + Math.abs(noise2D(i, seed)) * 1.0);
+        group.add(tree);
+      }
+    }
+
+    // Bushes
+    this.addBushes(group, worldRadius, wx, wz, seed, 4);
+
+    // Rocks
+    this.addRocks(group, worldRadius, wx, wz, seed, 2);
+
+    group.position.set(wx, 0, wz);
+    this.scene.add(group);
+    this.islandMeshes.set(id, group);
+  }
+
+  // ===== LARGE: 50+ cells — big island with lots of detail =====
+  buildLarge(id, cells) {
+    const { wx, wz, worldRadius, seed } = this.getCenter(cells);
+    const group = new THREE.Group();
+
+    const segments = 64;
+    const geo = new THREE.PlaneGeometry(worldRadius * 2.4, worldRadius * 2.4, segments, segments);
+    geo.rotateX(-Math.PI / 2);
+
+    this.applyTerrainHeight(geo, wx, wz, worldRadius, seed, 7);
+    this.applyVertexColors(geo);
+    this.cullUnderwaterFaces(geo);
+
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.82, metalness: 0.02, side: THREE.DoubleSide
+    }));
+    group.add(mesh);
+
+    // Shallow water ring
+    const shallowGeo = new THREE.RingGeometry(worldRadius * 0.85, worldRadius * 1.1, 32);
+    shallowGeo.rotateX(-Math.PI / 2);
+    const shallowMat = new THREE.MeshStandardMaterial({
+      color: 0x1a998e, transparent: true, opacity: 0.2, roughness: 0.3, side: THREE.DoubleSide
+    });
+    const shallow = new THREE.Mesh(shallowGeo, shallowMat);
+    shallow.position.y = 0.15;
+    group.add(shallow);
+
+    // Many palm trees
+    const treeCount = Math.min(20, 6 + Math.floor(worldRadius * 0.2));
+    for (let i = 0; i < treeCount; i++) {
+      const angle = ((i * 137.508 + seed) % 360) * Math.PI / 180;
+      const dist = worldRadius * (0.1 + Math.abs(noise2D(i * 0.5, seed * 0.01)) * 0.55);
+      const tx = Math.cos(angle) * dist;
+      const tz = Math.sin(angle) * dist;
+      const h = this.sampleHeight(tx, tz, wx, wz, worldRadius, seed, 7);
+      if (h > 1.5) {
+        const tree = this.createPalmTree(seed + i);
+        tree.position.set(tx, h - 0.3, tz);
+        tree.scale.setScalar(2.5 + Math.abs(noise2D(i, seed)) * 1.2);
+        group.add(tree);
+      }
+    }
+
+    // Bushes & rocks
+    this.addBushes(group, worldRadius, wx, wz, seed, 8);
+    this.addRocks(group, worldRadius, wx, wz, seed, 4);
+
+    group.position.set(wx, 0, wz);
+    this.scene.add(group);
+    this.islandMeshes.set(id, group);
+  }
+
+  // ===== Shared terrain functions =====
+
+  applyTerrainHeight(geo, wx, wz, worldRadius, seed, maxHeight) {
+    const positions = geo.attributes.position;
+    for (let i = 0; i < positions.count; i++) {
+      const px = positions.getX(i);
+      const pz = positions.getZ(i);
+      const h = this.sampleHeight(px, pz, wx, wz, worldRadius, seed, maxHeight);
+      positions.setY(i, h);
+    }
+    geo.computeVertexNormals();
+  }
+
+  sampleHeight(px, pz, wx, wz, worldRadius, seed, maxHeight) {
     const dist = Math.sqrt(px * px + pz * pz) / worldRadius;
     const angle = Math.atan2(pz, px);
+
+    // Organic coastline
     const coastNoise =
       noise2D(Math.cos(angle) * 1.8 + seed * 0.007, Math.sin(angle) * 1.8 + seed * 0.003) * 0.22 +
       noise2D(Math.cos(angle) * 4 + seed * 0.013, Math.sin(angle) * 4 + seed * 0.009) * 0.08;
-    return dist - coastNoise;
-  }
+    const shore = dist - coastNoise;
 
-  getHeight(px, pz, worldCX, worldCZ, worldRadius, seed) {
-    const shore = this.getCoastDist(px, pz, worldRadius, seed);
     const t = Math.max(0, 1 - shore);
-    const profile = t * t * (3 - 2 * t); // smoothstep
+    const profile = t * t * (3 - 2 * t);
 
-    const wx = (px + worldCX) * 0.035;
-    const wz = (pz + worldCZ) * 0.035;
-    const terrainNoise =
-      noise2D(wx, wz) * 1.2 +
-      noise2D_2(wx * 2.5, wz * 2.5) * 0.5;
+    const nx = (px + wx) * 0.035;
+    const nz = (pz + wz) * 0.035;
+    const terrainNoise = noise2D(nx, nz) * 1.2 + noise2D_2(nx * 2.5, nz * 2.5) * 0.5;
 
-    const maxHeight = 5 + worldRadius * 0.12;
     let height = profile * maxHeight + terrainNoise * profile * profile * 1.0;
 
-    // Smooth shore transition — gradually slope into water
     if (shore > 0.85 && shore <= 1.1) {
       const fade = (shore - 0.85) / 0.25;
-      const smoothFade = fade * fade * (3 - 2 * fade);
-      height = height * (1 - smoothFade) + (-1.5) * smoothFade;
+      const sf = fade * fade * (3 - 2 * fade);
+      height = height * (1 - sf) + (-1.5) * sf;
     } else if (shore > 1.1) {
       height = -3;
     }
@@ -167,66 +349,26 @@ export class IslandManager {
     return height;
   }
 
-  rebuildCluster(clusterId, cells) {
-    if (!cells || cells.length === 0) return;
-
-    const group = new THREE.Group();
-    group.userData.cellCount = cells.length;
-
-    const xs = cells.map(c => c.x);
-    const ys = cells.map(c => c.y);
-    const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const spanX = Math.max(...xs) - Math.min(...xs) + 1;
-    const spanY = Math.max(...ys) - Math.min(...ys) + 1;
-    const radius = Math.max(spanX, spanY) / 2 + 1;
-
-    const worldCX = centerX * this.cellSize;
-    const worldCZ = -centerY * this.cellSize;
-    const worldRadius = radius * this.cellSize;
-    const seed = Math.abs(Math.round(worldCX * 137 + worldCZ * 311)) % 10000;
-
-    // --- Terrain mesh ---
-    const segments = 80;
-    const size = worldRadius * 2.6;
-    const geo = new THREE.PlaneGeometry(size, size, segments, segments);
-    geo.rotateX(-Math.PI / 2);
-
+  applyVertexColors(geo) {
     const positions = geo.attributes.position;
     const colors = new Float32Array(positions.count * 3);
 
     for (let i = 0; i < positions.count; i++) {
-      const px = positions.getX(i);
-      const pz = positions.getZ(i);
-
-      const height = this.getHeight(px, pz, worldCX, worldCZ, worldRadius, seed);
-      positions.setY(i, height);
-
-      // Vertex colors with smooth gradients
+      const h = positions.getY(i);
       const color = new THREE.Color();
-      if (height < -0.5) {
-        // Underwater rock
+
+      if (h < -0.5) {
         color.setRGB(0.15, 0.12, 0.1);
-      } else if (height < 0.3) {
-        // Wet sand at waterline
-        const t = (height + 0.5) / 0.8;
-        color.lerpColors(new THREE.Color(0x6b5a3e), new THREE.Color(0xd4b896), Math.max(0, t));
-      } else if (height < 1.2) {
-        // Dry sand / beach
-        const t = (height - 0.3) / 0.9;
-        color.lerpColors(new THREE.Color(0xf0ddb8), new THREE.Color(0xe8d5a0), t);
-      } else if (height < 2.0) {
-        // Sand to grass transition
-        const t = (height - 1.2) / 0.8;
-        color.lerpColors(new THREE.Color(0xc8c080), new THREE.Color(0x5a9a2a), t);
-      } else if (height < 4.5) {
-        // Lush grass
-        const t = (height - 2.0) / 2.5;
-        color.lerpColors(new THREE.Color(0x4a8a28), new THREE.Color(0x2d6b1a), t);
+      } else if (h < 0.3) {
+        color.lerpColors(new THREE.Color(0x6b5a3e), new THREE.Color(0xd4b896), Math.max(0, (h + 0.5) / 0.8));
+      } else if (h < 1.2) {
+        color.lerpColors(new THREE.Color(0xf0ddb8), new THREE.Color(0xe8d5a0), (h - 0.3) / 0.9);
+      } else if (h < 2.0) {
+        color.lerpColors(new THREE.Color(0xc8c080), new THREE.Color(0x5a9a2a), (h - 1.2) / 0.8);
+      } else if (h < 4.5) {
+        color.lerpColors(new THREE.Color(0x4a8a28), new THREE.Color(0x2d6b1a), (h - 2.0) / 2.5);
       } else {
-        // Rocky top
-        const t = Math.min(1, (height - 4.5) / 2);
-        color.lerpColors(new THREE.Color(0x3a5a20), new THREE.Color(0x7a7a6a), t);
+        color.lerpColors(new THREE.Color(0x3a5a20), new THREE.Color(0x7a7a6a), Math.min(1, (h - 4.5) / 2));
       }
 
       colors[i * 3] = color.r;
@@ -235,87 +377,22 @@ export class IslandManager {
     }
 
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geo.computeVertexNormals();
+  }
 
-    // Remove fully underwater triangles
+  cullUnderwaterFaces(geo) {
+    const positions = geo.attributes.position;
     const index = geo.index;
     const newIndices = [];
     for (let i = 0; i < index.count; i += 3) {
-      const a = index.getX(i);
-      const b = index.getX(i + 1);
-      const c = index.getX(i + 2);
+      const a = index.getX(i), b = index.getX(i + 1), c = index.getX(i + 2);
       if (positions.getY(a) > -2 || positions.getY(b) > -2 || positions.getY(c) > -2) {
         newIndices.push(a, b, c);
       }
     }
     geo.setIndex(newIndices);
-
-    const terrainMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.82,
-      metalness: 0.02,
-      side: THREE.DoubleSide
-    }));
-    terrainMesh.receiveShadow = true;
-    group.add(terrainMesh);
-
-    // --- Shallow water ring (transparent turquoise near shore) ---
-    const shallowGeo = new THREE.RingGeometry(worldRadius * 0.8, worldRadius * 1.15, 48);
-    shallowGeo.rotateX(-Math.PI / 2);
-    // Deform ring to match coastline
-    const sPos = shallowGeo.attributes.position;
-    for (let i = 0; i < sPos.count; i++) {
-      const sx = sPos.getX(i);
-      const sz = sPos.getZ(i);
-      const angle = Math.atan2(sz, sx);
-      const dist = Math.sqrt(sx * sx + sz * sz);
-      const coastNoise =
-        noise2D(Math.cos(angle) * 1.8 + seed * 0.007, Math.sin(angle) * 1.8 + seed * 0.003) * 0.22 +
-        noise2D(Math.cos(angle) * 4 + seed * 0.013, Math.sin(angle) * 4 + seed * 0.009) * 0.08;
-      const deform = 1 + coastNoise * 0.5;
-      sPos.setX(i, sx * deform);
-      sPos.setZ(i, sz * deform);
-    }
-    shallowGeo.computeVertexNormals();
-
-    const shallowMat = new THREE.MeshStandardMaterial({
-      color: 0x1a998e,
-      transparent: true,
-      opacity: 0.25,
-      roughness: 0.3,
-      side: THREE.DoubleSide
-    });
-    const shallow = new THREE.Mesh(shallowGeo, shallowMat);
-    shallow.position.y = 0.15;
-    group.add(shallow);
-
-    // --- Vegetation ---
-    this.addPalmTrees(group, worldRadius, worldCX, worldCZ, seed);
-    this.addBushes(group, worldRadius, worldCX, worldCZ, seed);
-    this.addRocks(group, worldRadius, worldCX, worldCZ, seed);
-
-    group.position.set(worldCX, 0, worldCZ);
-    this.scene.add(group);
-    this.islandMeshes.set(clusterId, group);
   }
 
-  addPalmTrees(group, radius, wx, wz, seed) {
-    const count = Math.min(15, Math.floor(4 + radius * 0.3));
-    for (let i = 0; i < count; i++) {
-      const angle = ((i * 137.508 + seed) % 360) * Math.PI / 180;
-      const dist = radius * (0.15 + Math.abs(noise2D(i * 0.5 + seed * 0.01, 0)) * 0.5);
-      const x = Math.cos(angle) * dist;
-      const z = Math.sin(angle) * dist;
-
-      const h = this.getHeight(x, z, wx, wz, radius, seed);
-      if (h < 1.5 || h > 7) continue;
-
-      const tree = this.createPalmTree(seed + i);
-      tree.position.set(x, h - 0.3, z);
-      tree.scale.setScalar(2.2 + Math.abs(noise2D(i, seed)) * 1.2);
-      group.add(tree);
-    }
-  }
+  // ===== Vegetation =====
 
   createPalmTree(seed) {
     const tree = new THREE.Group();
@@ -323,165 +400,93 @@ export class IslandManager {
     const lean = 0.1 + (seed % 4) * 0.03;
     const leanDir = seed * 1.7;
 
-    // Trunk with catmull-rom curve
     const curve = new THREE.CatmullRomCurve3([
       new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(Math.cos(leanDir) * lean, trunkHeight * 0.35, Math.sin(leanDir) * lean),
+      new THREE.Vector3(Math.cos(leanDir) * lean, trunkHeight * 0.4, Math.sin(leanDir) * lean),
       new THREE.Vector3(Math.cos(leanDir) * lean * 2.2, trunkHeight * 0.7, Math.sin(leanDir) * lean * 2.2),
       new THREE.Vector3(Math.cos(leanDir) * lean * 2.5, trunkHeight, Math.sin(leanDir) * lean * 2.5),
     ]);
 
-    const trunkGeo = new THREE.TubeGeometry(curve, 10, 0.14, 6, false);
-    const trunkMat = new THREE.MeshStandardMaterial({
-      color: 0x8B6914,
-      roughness: 0.95
-    });
-    tree.add(new THREE.Mesh(trunkGeo, trunkMat));
-
-    // Trunk rings (bark detail)
-    for (let r = 0; r < 6; r++) {
-      const t = r / 6;
-      const p = curve.getPoint(t);
-      const ringGeo = new THREE.TorusGeometry(0.16, 0.02, 4, 8);
-      const ringMat = new THREE.MeshStandardMaterial({ color: 0x6b5010, roughness: 1 });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.position.copy(p);
-      ring.rotation.x = Math.PI / 2;
-      tree.add(ring);
-    }
+    const trunkGeo = new THREE.TubeGeometry(curve, 6, 0.14, 5, false);
+    tree.add(new THREE.Mesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.95 })));
 
     const top = curve.getPoint(1);
 
-    // Palm fronds — wide leaf shapes
-    const frondCount = 7 + (seed % 3);
+    // Fronds — simple wide shapes
+    const frondCount = 6;
     for (let i = 0; i < frondCount; i++) {
       const fAngle = (i / frondCount) * Math.PI * 2 + seed * 0.3;
       const droop = 0.5 + (seed % 3) * 0.12;
-      const length = 2.0 + (i % 2) * 0.5;
+      const length = 2.0;
 
-      // Frond shape — wide leaf using custom geometry
       const frondShape = new THREE.Shape();
-      const steps = 10;
-      // Top edge
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        const x = t * length;
-        const width = Math.sin(t * Math.PI) * 0.35;
-        frondShape.lineTo(x, width);
+      for (let s = 0; s <= 8; s++) {
+        const t = s / 8;
+        frondShape.lineTo(t * length, Math.sin(t * Math.PI) * 0.35);
       }
-      // Bottom edge (back)
-      for (let s = steps; s >= 0; s--) {
-        const t = s / steps;
-        const x = t * length;
-        const width = -Math.sin(t * Math.PI) * 0.35;
-        frondShape.lineTo(x, width);
+      for (let s = 8; s >= 0; s--) {
+        const t = s / 8;
+        frondShape.lineTo(t * length, -Math.sin(t * Math.PI) * 0.35);
       }
 
       const frondGeo = new THREE.ShapeGeometry(frondShape, 1);
       const frondMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setHSL(0.30 + (i % 3) * 0.015, 0.55, 0.25 + (i % 4) * 0.03),
-        side: THREE.DoubleSide,
-        roughness: 0.85
+        color: new THREE.Color().setHSL(0.30 + (i % 3) * 0.015, 0.55, 0.25),
+        side: THREE.DoubleSide, roughness: 0.85
       });
       const frond = new THREE.Mesh(frondGeo, frondMat);
       frond.position.copy(top);
-      frond.rotation.set(
-        droop * 0.7,
-        fAngle,
-        -droop * 0.3 + (i % 2 ? 0.1 : -0.1)
-      );
+      frond.rotation.set(droop * 0.7, fAngle, -droop * 0.3);
       tree.add(frond);
-
-      // Central rib of each frond
-      const ribCurve = new THREE.QuadraticBezierCurve3(
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(length * 0.5, 0.15, 0),
-        new THREE.Vector3(length, -droop * 0.4, 0)
-      );
-      const ribGeo = new THREE.TubeGeometry(ribCurve, 6, 0.015, 3, false);
-      const ribMat = new THREE.MeshStandardMaterial({ color: 0x3d6a1e, roughness: 0.9 });
-      const rib = new THREE.Mesh(ribGeo, ribMat);
-      rib.position.copy(top);
-      rib.rotation.set(droop * 0.7, fAngle, -droop * 0.3);
-      tree.add(rib);
-    }
-
-    // Coconuts cluster
-    const coconutCount = 1 + (seed % 3);
-    for (let c = 0; c < coconutCount; c++) {
-      const ca = (c / coconutCount) * Math.PI * 2 + seed * 0.5;
-      const cGeo = new THREE.SphereGeometry(0.1, 6, 6);
-      const cMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1e, roughness: 0.9 });
-      const coconut = new THREE.Mesh(cGeo, cMat);
-      coconut.position.set(
-        top.x + Math.cos(ca) * 0.22,
-        top.y - 0.25,
-        top.z + Math.sin(ca) * 0.22
-      );
-      tree.add(coconut);
     }
 
     return tree;
   }
 
-  addBushes(group, radius, wx, wz, seed) {
-    const count = Math.floor(6 + radius * 0.2);
+  addBushes(group, radius, wx, wz, seed, count) {
     for (let i = 0; i < count; i++) {
       const angle = ((i * 97.3 + seed * 0.5) % 360) * Math.PI / 180;
       const dist = radius * (0.2 + Math.abs(noise2D(i * 0.7, seed * 0.02)) * 0.45);
       const x = Math.cos(angle) * dist;
       const z = Math.sin(angle) * dist;
-
-      const h = this.getHeight(x, z, wx, wz, radius, seed);
+      const h = this.sampleHeight(x, z, wx, wz, radius, seed, 5);
       if (h < 1.8 || h > 5) continue;
 
-      const bushSize = 0.6 + Math.random() * 0.8;
-      const bushGeo = new THREE.SphereGeometry(bushSize, 6, 5);
-      // Squash vertically
+      const bushGeo = new THREE.SphereGeometry(0.6 + Math.random() * 0.5, 5, 4);
       const bPos = bushGeo.attributes.position;
       for (let v = 0; v < bPos.count; v++) {
         bPos.setY(v, bPos.getY(v) * 0.6);
-        bPos.setX(v, bPos.getX(v) + (Math.random() - 0.5) * 0.15);
-        bPos.setZ(v, bPos.getZ(v) + (Math.random() - 0.5) * 0.15);
       }
       bushGeo.computeVertexNormals();
 
-      const bushMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setHSL(0.28 + Math.random() * 0.06, 0.5, 0.18 + Math.random() * 0.1),
+      const bush = new THREE.Mesh(bushGeo, new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(0.28, 0.5, 0.2 + Math.random() * 0.08),
         roughness: 0.9
-      });
-      const bush = new THREE.Mesh(bushGeo, bushMat);
+      }));
       bush.position.set(x, h, z);
-      bush.scale.setScalar(1.5 + Math.random());
+      bush.scale.setScalar(1.5);
       group.add(bush);
     }
   }
 
-  addRocks(group, radius, wx, wz, seed) {
-    const count = 3 + (seed % 5);
+  addRocks(group, radius, wx, wz, seed, count) {
     for (let i = 0; i < count; i++) {
       const angle = ((i * 137.5 + seed * 0.7) % 360) * Math.PI / 180;
       const dist = radius * (0.7 + (i % 3) * 0.1);
       const x = Math.cos(angle) * dist;
       const z = Math.sin(angle) * dist;
+      const h = this.sampleHeight(x, z, wx, wz, radius, seed, 5);
 
-      const h = this.getHeight(x, z, wx, wz, radius, seed);
-
-      const size = 0.5 + (seed + i) % 3 * 0.3;
-      const geo = new THREE.DodecahedronGeometry(size, 1);
+      const geo = new THREE.DodecahedronGeometry(0.5 + (seed + i) % 3 * 0.2, 0);
       const pos = geo.attributes.position;
       for (let v = 0; v < pos.count; v++) {
-        pos.setY(v, pos.getY(v) * (0.4 + Math.random() * 0.3));
-        pos.setX(v, pos.getX(v) * (0.7 + Math.random() * 0.5));
-        pos.setZ(v, pos.getZ(v) * (0.7 + Math.random() * 0.5));
+        pos.setY(v, pos.getY(v) * 0.4);
       }
       geo.computeVertexNormals();
 
-      const mat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setHSL(0.06, 0.08, 0.38 + (i % 3) * 0.04),
-        roughness: 1.0
-      });
-      const rock = new THREE.Mesh(geo, mat);
+      const rock = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: 0x5a5a50, roughness: 1.0
+      }));
       rock.position.set(x, Math.max(0.2, h), z);
       rock.rotation.set(i * 1.3, i * 0.7, i * 2.1);
       rock.scale.setScalar(1.5);
