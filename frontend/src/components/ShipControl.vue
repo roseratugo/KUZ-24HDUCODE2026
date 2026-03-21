@@ -24,6 +24,7 @@ const cooldownPercent = computed(() => {
 
 onMounted(() => {
   shipStore.checkAndRestoreCooldown();
+  shipStore.loadMoveHistory();
 });
 
 const energyPercent = computed(() => {

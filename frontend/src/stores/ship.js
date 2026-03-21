@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { shipApi } from '../api/client';
+import { movesApi } from '../api/mapApi';
 
 const STORAGE_KEY = 'kuz-ship-state';
 
@@ -96,6 +97,8 @@ export const useShipStore = defineStore('ship', {
 
       this.error = null;
       const speed = this.shipLevel?.speed || 5000;
+      const fromPosition = this.position ? { ...this.position } : null;
+      const energyBefore = this.energy;
       this.lastMoveAt = new Date().toISOString();
       this.cooldownRemaining = speed;
       this.startCooldownTimer();
@@ -109,12 +112,21 @@ export const useShipStore = defineStore('ship', {
         this.discoveredCells = data.discoveredCells || [];
         this.lastUpdate = new Date().toISOString();
 
-        this.moveHistory.push({
+        const moveRecord = {
           direction,
-          position: data.position,
-          energy: data.energy,
+          fromPosition,
+          toPosition: data.position,
+          energyBefore,
+          energyAfter: data.energy,
           cellsDiscovered: this.discoveredCells.length,
           timestamp: new Date().toISOString()
+        };
+
+        this.moveHistory.push(moveRecord);
+
+        // Save to DB (fire and forget)
+        movesApi.save(moveRecord).catch(err => {
+          console.error('Failed to save move to DB:', err);
         });
 
         saveToStorage(this);
@@ -124,6 +136,33 @@ export const useShipStore = defineStore('ship', {
         this.error = err.response?.data?.message || 'Erreur lors du deplacement';
         console.error('Error moving ship:', err);
         throw err;
+      }
+    },
+
+    async loadMoveHistory() {
+      try {
+        const response = await movesApi.getRecent(100);
+        this.moveHistory = response.data.map(m => ({
+          direction: m.direction,
+          fromPosition: m.fromPosition,
+          toPosition: m.toPosition,
+          energyBefore: m.energyBefore,
+          energyAfter: m.energyAfter,
+          cellsDiscovered: m.cellsDiscovered,
+          timestamp: m.timestamp
+        })).reverse();
+      } catch (err) {
+        console.error('Failed to load move history:', err);
+      }
+    },
+
+    async getMoveStats() {
+      try {
+        const response = await movesApi.getStats();
+        return response.data;
+      } catch (err) {
+        console.error('Failed to get move stats:', err);
+        return null;
       }
     },
 
@@ -206,6 +245,9 @@ export const useShipStore = defineStore('ship', {
 
     clearHistory() {
       this.moveHistory = [];
+      movesApi.clearAll().catch(err => {
+        console.error('Failed to clear move history from DB:', err);
+      });
     },
 
     resetState() {
@@ -215,6 +257,9 @@ export const useShipStore = defineStore('ship', {
       this.maxEnergy = 100;
       this.discoveredCells = [];
       this.moveHistory = [];
+      movesApi.clearAll().catch(err => {
+        console.error('Failed to clear move history from DB:', err);
+      });
     }
   }
 });
