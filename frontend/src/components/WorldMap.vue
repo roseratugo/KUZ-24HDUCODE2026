@@ -58,7 +58,7 @@ const cellStyle = computed(() => ({
 
 const getCellClass = (item) => {
   const classes = ['cell'];
-  if (!item.cell) {
+  if (!item.cell || !item.cell.type) {
     classes.push('unknown');
   } else {
     classes.push(item.cell.type.toLowerCase());
@@ -70,9 +70,9 @@ const getCellClass = (item) => {
     }
     if (item.cell.island) {
       const islandData = mapStore.islands.get(item.cell.island.id);
-      const islandState = islandData?.state || 'DISCOVERED';
       classes.push('has-island');
-      classes.push(islandState === 'KNOWN' ? 'island-known' : 'island-discovered');
+      // DISCOVERED (en attente) → jaune | VALIDATED ou autre état confirmé → vert
+      classes.push((!islandData || islandData.state === 'DISCOVERED') ? 'island-discovered' : 'island-known');
     }
   }
   if (item.isShip) {
@@ -277,11 +277,11 @@ onMounted(async () => {
       </div>
       <div class="legend-item">
         <span class="legend-color island-known"></span>
-        <span>Île confirmée</span>
+        <span>Île validée</span>
       </div>
       <div class="legend-item">
         <span class="legend-color island-discovered"></span>
-        <span>Île en attente</span>
+        <span>Île découverte</span>
       </div>
       <div class="legend-item">
         <span class="legend-color rocks"></span>
