@@ -32,8 +32,7 @@ export const useBotStore = defineStore('bot', () => {
       status: 'stopped', // stopped, running, paused
       config: {
         'Buffer sécurité': '3',
-        'Délai (ms)': '100',
-        'Diagonales': 'Non'
+        'Délai (ms)': '100'
       }
     },
     // Bots futurs - Non disponibles pour l'instant
@@ -140,15 +139,10 @@ export const useBotStore = defineStore('bot', () => {
     const mapStore = useMapStore();
     const playerStore = usePlayerStore();
 
-    // Créer l'instance du bot avec algorithme BFS frontière
-    const useDiagonals = ['oui', 'yes', 'true', '1'].includes(
-      (bot.config['Diagonales'] || 'non').toLowerCase()
-    );
-
+    // Créer l'instance du bot avec algorithme BFS frontière 8-directions
     const explorationBot = new ExplorationBot({
       safetyBuffer: parseInt(bot.config['Buffer sécurité']) || 3,
-      moveDelay: parseInt(bot.config['Délai (ms)']) || 100,
-      useDiagonals
+      moveDelay: parseInt(bot.config['Délai (ms)']) || 100
     });
 
     // Initialiser les logs

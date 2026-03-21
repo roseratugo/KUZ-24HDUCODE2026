@@ -1,7 +1,7 @@
 /**
  * ExplorationBot - Explorateur autonome avec algorithme BFS frontière
  *
- * Algorithme : Exploration par frontières avec pathfinding BFS
+ * Algorithme : Exploration par frontières avec pathfinding BFS 8-directionnel
  *
  * 1. Multi-source BFS depuis toutes les îles (SAND) pour calculer la distance de retour
  * 2. BFS depuis la position actuelle pour trouver la meilleure frontière
@@ -9,18 +9,20 @@
  * 3. Score = valeur_découverte / (distance + 1) → maximise les découvertes par mouvement
  * 4. Exécute un seul pas par tick, puis re-planifie (adapte aux nouvelles découvertes)
  * 5. Quand l'énergie est critique, BFS vers l'île la plus proche
+ * 6. Quand des îles sont DISCOVERED, retour vers île KNOWN pour valider
  *
- * Sécurité : maintient toujours assez d'énergie pour revenir à une île
- * Zones : les cellules de zone > niveau du bateau sont traitées comme des murs
- * Efficacité : re-planifie chaque mouvement pour un chemin optimal
+ * Le bot ne s'arrête JAMAIS : il explore en continu.
+ * Diagonales prioritaires : NE/SE/SW/NW avant N/E/S/W pour couvrir plus de terrain.
+ * Zones : les cellules de zone > niveau du bateau sont traitées comme des murs.
  */
 
 import { shipApi, playerApi } from '../api/client';
 import { shipPositionApi, movesApi } from '../api/mapApi';
 
+// Diagonales EN PREMIER pour maximiser la couverture par mouvement
+// En Chebyshev, un mouvement diagonal couvre dx+dy simultanément = plus efficace
+const DIAG_FIRST_DIRECTIONS = ['NE', 'SE', 'SW', 'NW', 'N', 'E', 'S', 'W'];
 const CARDINAL_DIRECTIONS = ['N', 'E', 'S', 'W'];
-const DIAGONAL_DIRECTIONS = ['NE', 'SE', 'SW', 'NW'];
-const ALL_DIRECTIONS = [...CARDINAL_DIRECTIONS, ...DIAGONAL_DIRECTIONS];
 
 const DIRECTION_VECTORS = {
   'N':  { dx:  0, dy: -1 },
@@ -46,8 +48,7 @@ export class ExplorationBot {
     this.config = {
       safetyBuffer: options.safetyBuffer ?? 3,
       moveDelay: options.moveDelay ?? 100,
-      maxConsecutiveErrors: options.maxConsecutiveErrors ?? 5,
-      useDiagonals: options.useDiagonals ?? false
+      maxConsecutiveErrors: options.maxConsecutiveErrors ?? 5
     };
 
     // Ship state
@@ -65,6 +66,10 @@ export class ExplorationBot {
     this.blockedDirections = new Map(); // "x,y" -> Set<direction>
     this.homeIsland = null;
 
+    // Exploration anti-boucle : positions récemment visitées
+    this.recentPositions = [];
+    this.maxRecentPositions = 20;
+
     // Callbacks
     this.onStatusChange = null;
     this.onMove = null;
@@ -74,6 +79,7 @@ export class ExplorationBot {
 
     // Error tracking
     this.consecutiveErrors = 0;
+    this.stuckCounter = 0;
   }
 
   // ─────────────────────── Logging ───────────────────────
@@ -103,7 +109,7 @@ export class ExplorationBot {
     this.mapStore = mapStore;
     this.playerStore = playerStore;
 
-    this.log('🚀 Démarrage du bot d\'exploration (algorithme BFS frontière)');
+    this.log('🚀 Démarrage du bot d\'exploration (BFS 8-dir, diagonales prioritaires)');
 
     try {
       await this.loadInitialState();
@@ -234,12 +240,13 @@ export class ExplorationBot {
     this.log(`🏝️ Îles KNOWN: ${this.knownIslands.length}`);
     this.log(`🔍 Îles DISCOVERED: ${this.discoveredIslands.length}`);
     this.log(`🚢 Niveau bateau: ${this.shipLevelNumber}`);
-    this.log(`🛡️ Buffer sécurité: ${this.config.safetyBuffer}`);
+    this.log(`↗️ Mode: 8 directions, diagonales prioritaires`);
     this.log('═══════════════════════════════════════');
   }
 
   async discoverInitialPosition() {
-    for (const direction of CARDINAL_DIRECTIONS) {
+    // Essayer diagonales d'abord (plus efficace)
+    for (const direction of DIAG_FIRST_DIRECTIONS) {
       try {
         this.log(`🎲 Tentative mouvement ${direction}...`);
         const response = await shipApi.move(direction);
@@ -271,7 +278,7 @@ export class ExplorationBot {
   // ─────────────────────── Main Loop ───────────────────────
 
   async runLoop() {
-    this.log('🔁 Démarrage de la boucle principale (BFS frontière)');
+    this.log('🔁 Boucle principale — le bot ne s\'arrêtera JAMAIS');
     let tickCount = 0;
 
     while (this.isRunning) {
@@ -293,9 +300,16 @@ export class ExplorationBot {
         this.log(`❌ Erreur tick #${tickCount}: ${errCode ? `[${errCode}] ` : ''}${errMsg}`, 'error');
 
         if (this.consecutiveErrors >= this.config.maxConsecutiveErrors) {
-          this.log(`🛑 ARRÊT: Trop d'erreurs consécutives!`, 'error');
-          this.stop();
-          break;
+          this.log(`⚠️ ${this.consecutiveErrors} erreurs consécutives, reset des directions bloquées et reprise...`, 'warn');
+          this.blockedDirections.clear();
+          this.consecutiveErrors = 0;
+          this.stuckCounter++;
+
+          if (this.stuckCounter >= 3) {
+            this.log(`🔄 Stuck x3, pause de 10s puis reprise...`, 'warn');
+            this.stuckCounter = 0;
+            await this.sleep(10000);
+          }
         }
 
         await this.sleep(2000);
@@ -352,30 +366,15 @@ export class ExplorationBot {
 
   // ─────────────────────── Core Algorithm ───────────────────────
 
-  /**
-   * Extrait le numéro de niveau du bateau pour comparaison avec les zones.
-   * Le bateau ne peut pas entrer dans une zone de niveau supérieur au sien.
-   */
   extractShipLevel() {
     const levelName = this.shipStore?.shipLevel?.name || '';
     const match = levelName.match(/\d+/);
     if (match) return parseInt(match[0]);
-    // Fallback: utiliser la zone de la position actuelle
     return this.currentPosition?.zone || 1;
   }
 
   /**
-   * Retourne les directions disponibles selon la configuration.
-   */
-  getMovementDirections() {
-    return this.config.useDiagonals ? ALL_DIRECTIONS : CARDINAL_DIRECTIONS;
-  }
-
-  /**
    * Vérifie si une cellule est traversable pour le pathfinding.
-   * - Doit être connue (SEEN ou KNOWN)
-   * - Pas un rocher
-   * - Zone <= niveau du bateau
    */
   isCellPassable(x, y) {
     const cell = this.knownCells.get(`${x},${y}`);
@@ -407,28 +406,24 @@ export class ExplorationBot {
   /**
    * Multi-source BFS depuis toutes les cellules SAND (îles).
    * Retourne une Map "x,y" -> distance vers l'île la plus proche.
-   * Permet de connaître en O(1) le coût de retour depuis n'importe quelle position.
    */
   computeIslandDistanceMap() {
     const distMap = new Map();
     const queue = [];
-    const directions = this.getMovementDirections();
 
-    // Initialiser avec toutes les cellules SAND à distance 0
     for (const [key, cell] of this.knownCells) {
-      if (cell.type === 'SAND') {
+      if (cell.type === 'SAND' && (cell.zone === undefined || cell.zone <= this.shipLevelNumber)) {
         distMap.set(key, 0);
         queue.push({ x: cell.x, y: cell.y });
       }
     }
 
-    // BFS outward depuis toutes les îles simultanément
     let head = 0;
     while (head < queue.length) {
       const { x, y } = queue[head++];
       const currentDist = distMap.get(`${x},${y}`);
 
-      for (const dir of directions) {
+      for (const dir of DIAG_FIRST_DIRECTIONS) {
         const vec = DIRECTION_VECTORS[dir];
         const nx = x + vec.dx;
         const ny = y + vec.dy;
@@ -447,17 +442,14 @@ export class ExplorationBot {
 
   /**
    * BFS depuis la position actuelle pour trouver la meilleure frontière.
+   * Utilise 8 directions avec diagonales en priorité.
    *
-   * Une frontière = cellule connue et passable qui a des cellules inconnues
-   * dans son rayon de visibilité (= on découvrira de nouvelles cases en y allant).
-   *
-   * Score = discoveryValue / (distance + 1) → maximise découvertes par mouvement
-   *
-   * Retourne { frontier, path, hasUnaffordableFrontiers } ou null si aucune frontière.
+   * Score = discoveryValue / (distance + 1)
+   * Bonus anti-revisit : pénalise les cellules récemment visitées.
    */
   findBestFrontier(islandDistMap) {
     const pos = this.currentPosition;
-    if (!pos) return null;
+    if (!pos) return { frontier: null, path: null, hasUnaffordableFrontiers: false };
 
     const startKey = `${pos.x},${pos.y}`;
     const queue = [{ x: pos.x, y: pos.y }];
@@ -469,14 +461,15 @@ export class ExplorationBot {
     let bestScore = -1;
     let hasUnaffordableFrontiers = false;
 
-    const directions = this.getMovementDirections();
+    // Set des positions récentes pour pénaliser
+    const recentSet = new Set(this.recentPositions);
 
     while (head < queue.length) {
       const { x, y } = queue[head++];
       const key = `${x},${y}`;
       const dist = visited.get(key).dist;
 
-      // Vérifier si cette cellule est une frontière (a des inconnues à portée)
+      // Vérifier si cette cellule est une frontière
       if (dist > 0) {
         const discoveryValue = this.getDiscoveryValue(x, y);
         if (discoveryValue > 0) {
@@ -484,7 +477,9 @@ export class ExplorationBot {
           const totalCost = dist + returnCost + this.config.safetyBuffer;
 
           if (totalCost <= this.energy) {
-            const score = discoveryValue / (dist + 1);
+            // Pénaliser les positions récemment visitées
+            const recentPenalty = recentSet.has(key) ? 0.5 : 1.0;
+            const score = (discoveryValue * recentPenalty) / (dist + 1);
             if (score > bestScore) {
               bestScore = score;
               bestFrontier = { x, y, dist, score, discoveryValue, returnCost, totalCost, key };
@@ -495,12 +490,8 @@ export class ExplorationBot {
         }
       }
 
-      // Aussi vérifier à distance 0 si on est déjà sur une frontière
-      // (mais on ne la sélectionne pas comme cible - on est déjà dessus)
-      // On vérifie quand même pour savoir si des frontières existent
-
-      // Expansion BFS
-      for (const dir of directions) {
+      // Expansion BFS — diagonales en premier !
+      for (const dir of DIAG_FIRST_DIRECTIONS) {
         const vec = DIRECTION_VECTORS[dir];
         const nx = x + vec.dx;
         const ny = y + vec.dy;
@@ -520,21 +511,27 @@ export class ExplorationBot {
     }
 
     // Reconstruire le chemin
-    const path = [];
-    let current = bestFrontier.key;
-    while (visited.get(current).parent !== null) {
-      const { parent, dir } = visited.get(current);
-      path.unshift(dir);
-      current = parent;
-    }
-
+    const path = this.reconstructPath(visited, bestFrontier.key);
     return { frontier: bestFrontier, path, hasUnaffordableFrontiers };
   }
 
   /**
-   * BFS exact vers l'île la plus proche (cellule SAND).
+   * Reconstruit un chemin depuis les données BFS.
+   */
+  reconstructPath(visited, targetKey) {
+    const path = [];
+    let current = targetKey;
+    while (visited.get(current)?.parent !== null) {
+      const { parent, dir } = visited.get(current);
+      path.unshift(dir);
+      current = parent;
+    }
+    return path;
+  }
+
+  /**
+   * BFS exact vers l'île KNOWN la plus proche (cellule SAND).
    * Respecte les directions bloquées pour un chemin fiable.
-   * Retourne { path: direction[], dist: number } ou null.
    */
   bfsToNearestIsland() {
     const pos = this.currentPosition;
@@ -547,28 +544,19 @@ export class ExplorationBot {
     visited.set(startKey, { parent: null, dir: null });
     let head = 0;
 
-    const directions = this.getMovementDirections();
-
     while (head < queue.length) {
       const { x, y } = queue[head++];
       const key = `${x},${y}`;
 
-      // Trouvé une île ?
       if (key !== startKey) {
         const cell = this.knownCells.get(key);
         if (cell && cell.type === 'SAND' && (cell.zone === undefined || cell.zone <= this.shipLevelNumber)) {
-          const path = [];
-          let c = key;
-          while (visited.get(c).parent !== null) {
-            const { parent, dir } = visited.get(c);
-            path.unshift(dir);
-            c = parent;
-          }
+          const path = this.reconstructPath(visited, key);
           return { path, dist: path.length };
         }
       }
 
-      for (const dir of directions) {
+      for (const dir of DIAG_FIRST_DIRECTIONS) {
         const vec = DIRECTION_VECTORS[dir];
         const nx = x + vec.dx;
         const ny = y + vec.dy;
@@ -587,73 +575,193 @@ export class ExplorationBot {
   }
 
   /**
+   * BFS vers l'île KNOWN la plus proche pour valider les découvertes.
+   * Différent de bfsToNearestIsland: celui-ci cible spécifiquement
+   * les cellules SAND d'îles dont l'état est KNOWN (pas DISCOVERED).
+   */
+  bfsToKnownIsland() {
+    const pos = this.currentPosition;
+    if (!pos) return null;
+
+    // Si on est déjà sur une île KNOWN, pas besoin de bouger
+    if (this.isOnKnownIsland()) return { path: [], dist: 0 };
+
+    // Collecter les IDs des îles KNOWN
+    const knownIslandIds = new Set(this.knownIslands.map(i => i.id));
+
+    // Trouver les cellules SAND qui font partie d'îles KNOWN
+    const knownIslandCells = new Set();
+    for (const [key, cell] of this.knownCells) {
+      if (cell.type === 'SAND' && cell.state === 'KNOWN') {
+        knownIslandCells.add(key);
+      }
+      // Aussi via l'ID de l'île
+      if (cell.type === 'SAND' && cell.island?.id && knownIslandIds.has(cell.island.id)) {
+        knownIslandCells.add(key);
+      }
+    }
+
+    // Ajouter les cellules de homeIsland si on l'a
+    if (this.homeIsland) {
+      for (const [key, cell] of this.knownCells) {
+        if (cell.type === 'SAND' && cell.island?.name === this.homeIsland.name) {
+          knownIslandCells.add(key);
+        }
+      }
+    }
+
+    if (knownIslandCells.size === 0) {
+      // Fallback: n'importe quelle île SAND
+      return this.bfsToNearestIsland();
+    }
+
+    const startKey = `${pos.x},${pos.y}`;
+    const queue = [{ x: pos.x, y: pos.y }];
+    const visited = new Map();
+    visited.set(startKey, { parent: null, dir: null });
+    let head = 0;
+
+    while (head < queue.length) {
+      const { x, y } = queue[head++];
+      const key = `${x},${y}`;
+
+      if (key !== startKey && knownIslandCells.has(key)) {
+        const path = this.reconstructPath(visited, key);
+        return { path, dist: path.length };
+      }
+
+      for (const dir of DIAG_FIRST_DIRECTIONS) {
+        const vec = DIRECTION_VECTORS[dir];
+        const nx = x + vec.dx;
+        const ny = y + vec.dy;
+        const nkey = `${nx},${ny}`;
+
+        if (visited.has(nkey)) continue;
+        if (!this.isCellPassable(nx, ny)) continue;
+        if (this.isDirectionBlocked({ x, y }, dir)) continue;
+
+        visited.set(nkey, { parent: key, dir });
+        queue.push({ x: nx, y: ny });
+      }
+    }
+
+    // Pas d'île KNOWN trouvée, fallback
+    return this.bfsToNearestIsland();
+  }
+
+  /**
+   * Vérifie si on est sur une île KNOWN (pas juste SAND).
+   */
+  isOnKnownIsland() {
+    if (!this.currentPosition || this.currentPosition.type !== 'SAND') return false;
+    const key = `${this.currentPosition.x},${this.currentPosition.y}`;
+    const cell = this.knownCells.get(key);
+    if (cell?.state === 'KNOWN') return true;
+    // Vérifier via les IDs d'îles
+    const knownIds = new Set(this.knownIslands.map(i => i.id));
+    if (cell?.island?.id && knownIds.has(cell.island.id)) return true;
+    // Home island
+    if (cell?.island?.name === this.homeIsland?.name) return true;
+    return false;
+  }
+
+  /**
    * Moteur de décision principal.
+   * Le bot ne s'arrête JAMAIS. Il explore en boucle infinie.
    *
    * Priorités :
-   * 1. Énergie critique → retour immédiat vers île
-   * 2. Sur île + énergie insuffisante → attendre régénération
-   * 3. Frontière trouvée et abordable → explorer
-   * 4. Frontières inabordables → retourner à l'île pour recharger
-   * 5. Aucune frontière → exploration terminée
-   * 6. Pas d'île connue → exploration aléatoire prudente
+   * 1. Énergie critique → retour vers île KNOWN
+   * 2. Îles DISCOVERED à valider → retour vers île KNOWN
+   * 3. Sur île : recharger si besoin, puis explorer
+   * 4. Explorer vers la meilleure frontière
+   * 5. Aucune frontière abordable → retour recharge
+   * 6. Aucune frontière du tout → random walk (ne s'arrête jamais)
    */
   decideNextAction() {
     const pos = this.currentPosition;
-    if (!pos) return { type: 'wait', reason: 'no_position', duration: 5000 };
+    if (!pos) return { type: 'wait', reason: 'no_position', duration: 2000 };
 
-    // Calculer la carte de distances aux îles (multi-source BFS)
     const islandDistMap = this.computeIslandDistanceMap();
     const posKey = `${pos.x},${pos.y}`;
     const returnCostEstimate = islandDistMap.get(posKey) ?? Infinity;
     const hasKnownIsland = returnCostEstimate < Infinity;
 
-    this.log(`📊 (${pos.x},${pos.y}) | ⚡${this.energy}/${this.maxEnergy} | 🏝️retour≈${hasKnownIsland ? returnCostEstimate : '∞'} | Lv${this.shipLevelNumber}`);
+    this.log(`📊 (${pos.x},${pos.y}) | ⚡${this.energy}/${this.maxEnergy} | 🏝️ret≈${hasKnownIsland ? returnCostEstimate : '∞'} | Lv${this.shipLevelNumber} | 🔍DISC:${this.discoveredIslands.length}`);
 
-    // ─── 1. ÉNERGIE CRITIQUE : retour immédiat ───
+    // ─── 1. ÉNERGIE CRITIQUE → retour immédiat ───
     if (hasKnownIsland && returnCostEstimate > 0 && this.energy <= returnCostEstimate + this.config.safetyBuffer) {
       this.log(`⚠️ ÉNERGIE CRITIQUE (${this.energy} ≤ ${returnCostEstimate}+${this.config.safetyBuffer}) → RETOUR`, 'warn');
       const returnInfo = this.bfsToNearestIsland();
       if (returnInfo && returnInfo.path.length > 0) {
         return { type: 'move', direction: returnInfo.path[0], reason: 'retour_critique' };
       }
-      // BFS n'a pas trouvé de chemin (directions bloquées) - tenter direction brute
       const bruteDir = this.getBruteDirectionToIsland(islandDistMap);
       if (bruteDir) {
         return { type: 'move', direction: bruteDir, reason: 'retour_brut' };
       }
     }
 
-    // ─── 2. SUR UNE ÎLE ───
-    if (this.isOnIsland()) {
-      const result = this.findBestFrontier(islandDistMap);
+    // ─── 2. ÎLES DISCOVERED À VALIDER → retour vers île KNOWN ───
+    if (this.discoveredIslands.length > 0 && !this.isOnKnownIsland()) {
+      // On a des îles à valider : il faut retourner sur une île KNOWN
+      // Mais seulement si on a assez d'énergie, ou si on doit de toute façon rentrer
+      const returnInfo = this.bfsToKnownIsland();
+      if (returnInfo && returnInfo.path.length > 0) {
+        const canAffordReturn = this.energy > returnInfo.dist + this.config.safetyBuffer;
+        const shouldReturn = this.energy <= returnCostEstimate + this.config.safetyBuffer + 3;
 
-      if (!result.frontier) {
-        if (result.hasUnaffordableFrontiers) {
-          // Il existe des frontières mais on n'a pas assez d'énergie
-          this.log(`🔋 Recharge... frontières existent mais coût > énergie (${this.energy}/${this.maxEnergy})`);
-          return { type: 'wait', reason: 'recharge_pour_frontière', duration: 3000 };
+        if (canAffordReturn && shouldReturn) {
+          this.log(`📋 ${this.discoveredIslands.length} île(s) à valider → retour île KNOWN (dist: ${returnInfo.dist})`, 'warn');
+          return { type: 'move', direction: returnInfo.path[0], reason: 'validation_îles' };
         }
-        if (this.energy < this.maxEnergy) {
-          // Pas de frontière visible, peut-être qu'avec plus d'énergie on pourra aller plus loin
-          this.log(`🔋 Recharge complète en cours... (${this.energy}/${this.maxEnergy})`);
-          return { type: 'wait', reason: 'recharge_exploration', duration: 3000 };
-        }
-        this.log(`✅ Exploration terminée ! Aucune frontière accessible.`);
-        return { type: 'wait', reason: 'exploration_terminée', duration: 30000 };
-      }
 
-      // On a une frontière abordable
-      if (this.energy < result.frontier.totalCost) {
-        const needed = result.frontier.totalCost - this.energy;
-        this.log(`🔋 Besoin de ${needed} énergie supp. pour (${result.frontier.x},${result.frontier.y}) [coût: ${result.frontier.totalCost}]`);
-        return { type: 'wait', reason: 'recharge_cible', duration: 3000 };
+        // Si on peut encore explorer un peu avant de rentrer, on continue
+        // On ne rentre que quand l'énergie nous y oblige
       }
-
-      this.log(`🎯 Frontière (${result.frontier.x},${result.frontier.y}) score=${result.frontier.score.toFixed(2)} disc=${result.frontier.discoveryValue} dist=${result.frontier.dist} ret=${result.frontier.returnCost}`);
-      return { type: 'move', direction: result.path[0], reason: 'explorer' };
     }
 
-    // ─── 3. PAS SUR UNE ÎLE : explorer ou retourner ───
+    // ─── 3. SUR UNE ÎLE ───
+    if (this.isOnIsland()) {
+      // 3a. Si on est sur une île KNOWN et qu'on a des DISCOVERED à valider
+      if (this.isOnKnownIsland() && this.discoveredIslands.length > 0) {
+        this.log(`✅ Sur île KNOWN — validation de ${this.discoveredIslands.length} île(s) DISCOVERED en cours`);
+        // Le refresh de l'état a déjà synchro les îles, la validation se fait automatiquement
+        // via le game server quand on retourne sur une île KNOWN.
+        // On attend un tick pour que le serveur traite, puis on continue.
+      }
+
+      // 3b. Chercher la meilleure frontière
+      const result = this.findBestFrontier(islandDistMap);
+
+      if (result.frontier) {
+        if (this.energy >= result.frontier.totalCost) {
+          this.log(`🎯 Frontière (${result.frontier.x},${result.frontier.y}) score=${result.frontier.score.toFixed(2)} disc=${result.frontier.discoveryValue} dist=${result.frontier.dist}`);
+          return { type: 'move', direction: result.path[0], reason: 'explorer' };
+        }
+        // Pas assez d'énergie, recharger
+        const needed = result.frontier.totalCost - this.energy;
+        this.log(`🔋 Recharge: besoin ${needed} énergie pour frontière (${result.frontier.x},${result.frontier.y})`);
+        return { type: 'wait', reason: 'recharge', duration: 3000 };
+      }
+
+      if (result.hasUnaffordableFrontiers) {
+        this.log(`🔋 Frontières existent mais trop chères (${this.energy}/${this.maxEnergy})`);
+        return { type: 'wait', reason: 'recharge_frontière', duration: 3000 };
+      }
+
+      // Aucune frontière visible — mais on ne s'arrête JAMAIS
+      if (this.energy < this.maxEnergy) {
+        this.log(`🔋 Pas de frontière, recharge complète avant de tenter random (${this.energy}/${this.maxEnergy})`);
+        return { type: 'wait', reason: 'recharge_avant_random', duration: 3000 };
+      }
+
+      // Énergie pleine, aucune frontière → random walk pour trouver de nouvelles zones
+      this.log(`🔀 Aucune frontière trouvée — random walk pour découvrir de nouvelles zones`);
+      this.blockedDirections.clear(); // Reset des blocages potentiellement obsolètes
+      return this.getSmartRandomAction(islandDistMap);
+    }
+
+    // ─── 4. PAS SUR UNE ÎLE : explorer ───
     const result = this.findBestFrontier(islandDistMap);
 
     if (result.frontier) {
@@ -661,7 +769,7 @@ export class ExplorationBot {
       return { type: 'move', direction: result.path[0], reason: 'explorer' };
     }
 
-    // Pas de frontière abordable → retour à l'île pour recharger
+    // Pas de frontière abordable → retour recharge
     if (hasKnownIsland) {
       const returnInfo = this.bfsToNearestIsland();
       if (returnInfo && returnInfo.path.length > 0) {
@@ -670,25 +778,93 @@ export class ExplorationBot {
       }
     }
 
-    // ─── 4. PAS D'ÎLE CONNUE : exploration aléatoire prudente ───
-    if (!hasKnownIsland) {
-      this.log(`⚠️ Aucune île connue ! Exploration prudente...`, 'warn');
+    // ─── 5. AUCUNE ÎLE CONNUE : exploration aléatoire ───
+    this.log(`⚠️ Aucune île connue ! Exploration libre...`, 'warn');
+    return this.getSmartRandomAction(islandDistMap);
+  }
+
+  /**
+   * Mouvement aléatoire intelligent quand le BFS ne trouve pas de frontière.
+   * Priorise : inconnu > zones peu visitées > n'importe quelle direction
+   * Utilise la carte de distance aux îles pour rester en sécurité.
+   */
+  getSmartRandomAction(islandDistMap) {
+    const pos = this.currentPosition;
+    const recentSet = new Set(this.recentPositions);
+
+    // Construire la liste des directions avec leur score
+    const candidates = [];
+
+    for (const dir of DIAG_FIRST_DIRECTIONS) {
+      if (this.isDirectionBlocked(pos, dir)) continue;
+
+      const vec = DIRECTION_VECTORS[dir];
+      const nx = pos.x + vec.dx;
+      const ny = pos.y + vec.dy;
+      const nkey = `${nx},${ny}`;
+
+      const cell = this.knownCells.get(nkey);
+      const isUnknown = !cell;
+      const isPassable = isUnknown || this.isCellPassable(nx, ny);
+      if (!isPassable) continue;
+
+      // Vérifier qu'on peut revenir en sécurité
+      const returnFromThere = islandDistMap.get(nkey) ?? Infinity;
+      if (returnFromThere !== Infinity && this.energy - 1 <= returnFromThere + this.config.safetyBuffer) {
+        continue; // Trop risqué
+      }
+
+      let score = 0;
+
+      // Forte priorité pour les cellules inconnues
+      if (isUnknown) {
+        score += 100;
+      } else {
+        // Bonus pour les cellules avec des voisins inconnus
+        score += this.getDiscoveryValue(nx, ny) * 10;
+      }
+
+      // Pénaliser les cellules récemment visitées
+      if (recentSet.has(nkey)) {
+        score -= 50;
+      }
+
+      // Bonus pour les diagonales (couvrent plus de terrain)
+      if (dir.length === 2) {
+        score += 5;
+      }
+
+      candidates.push({ dir, score, isUnknown });
     }
 
-    return this.getRandomExploreAction();
+    if (candidates.length === 0) {
+      // Toutes les directions bloquées — on reset et on réessaie
+      this.log(`🔄 Toutes directions bloquées → reset blocages`);
+      this.blockedDirections.clear();
+      return { type: 'wait', reason: 'reset_blocages', duration: 1000 };
+    }
+
+    // Trier par score décroissant
+    candidates.sort((a, b) => b.score - a.score);
+
+    // Prendre le meilleur (ou random parmi les meilleurs si égalité)
+    const topScore = candidates[0].score;
+    const topCandidates = candidates.filter(c => c.score >= topScore - 5);
+    const chosen = topCandidates[Math.floor(Math.random() * topCandidates.length)];
+
+    const reason = chosen.isUnknown ? 'random_vers_inconnu' : 'random_exploration';
+    return { type: 'move', direction: chosen.dir, reason };
   }
 
   /**
    * Direction brute vers la zone de distance minimale sur la carte des îles.
-   * Utilisé en dernier recours quand le BFS ne trouve pas de chemin.
    */
   getBruteDirectionToIsland(islandDistMap) {
     const pos = this.currentPosition;
-    const directions = this.getMovementDirections();
     let bestDir = null;
     let bestDist = Infinity;
 
-    for (const dir of directions) {
+    for (const dir of DIAG_FIRST_DIRECTIONS) {
       if (this.isDirectionBlocked(pos, dir)) continue;
       const vec = DIRECTION_VECTORS[dir];
       const nkey = `${pos.x + vec.dx},${pos.y + vec.dy}`;
@@ -700,49 +876,6 @@ export class ExplorationBot {
     }
 
     return bestDir;
-  }
-
-  /**
-   * Action d'exploration aléatoire quand aucune stratégie BFS n'est disponible.
-   * Priorise les cellules inconnues, puis les passables.
-   */
-  getRandomExploreAction() {
-    const pos = this.currentPosition;
-    const directions = this.getMovementDirections();
-
-    // Priorité 1 : directions vers des cellules inconnues
-    const unknownDirs = directions.filter(dir => {
-      if (this.isDirectionBlocked(pos, dir)) return false;
-      const vec = DIRECTION_VECTORS[dir];
-      const nkey = `${pos.x + vec.dx},${pos.y + vec.dy}`;
-      return !this.knownCells.has(nkey);
-    });
-
-    if (unknownDirs.length > 0) {
-      const dir = unknownDirs[Math.floor(Math.random() * unknownDirs.length)];
-      return { type: 'move', direction: dir, reason: 'exploration_aléatoire_inconnue' };
-    }
-
-    // Priorité 2 : directions passables (pas rochers, pas haute zone)
-    const passableDirs = directions.filter(dir => {
-      if (this.isDirectionBlocked(pos, dir)) return false;
-      const vec = DIRECTION_VECTORS[dir];
-      return this.isCellPassable(pos.x + vec.dx, pos.y + vec.dy);
-    });
-
-    if (passableDirs.length > 0) {
-      const dir = passableDirs[Math.floor(Math.random() * passableDirs.length)];
-      return { type: 'move', direction: dir, reason: 'exploration_aléatoire' };
-    }
-
-    // Priorité 3 : n'importe quelle direction non bloquée
-    const unblockedDirs = directions.filter(dir => !this.isDirectionBlocked(pos, dir));
-    if (unblockedDirs.length > 0) {
-      const dir = unblockedDirs[Math.floor(Math.random() * unblockedDirs.length)];
-      return { type: 'move', direction: dir, reason: 'tentative_désespérée' };
-    }
-
-    return { type: 'wait', reason: 'complètement_bloqué', duration: 5000 };
   }
 
   // ─────────────────────── Movement ───────────────────────
@@ -764,6 +897,13 @@ export class ExplorationBot {
       const newPosStr = `(${data.position.x}, ${data.position.y})`;
       const energyDiff = data.energy - oldEnergy;
       this.log(`✅ ${fromPosStr} → ${newPosStr} | ⚡${oldEnergy}→${data.energy} (${energyDiff >= 0 ? '+' : ''}${energyDiff})`);
+
+      // Tracker les positions récentes (anti-boucle)
+      const newKey = `${data.position.x},${data.position.y}`;
+      this.recentPositions.push(newKey);
+      if (this.recentPositions.length > this.maxRecentPositions) {
+        this.recentPositions.shift();
+      }
 
       // Mettre à jour les stores
       this.shipStore.updateFromMoveResponse(data);
@@ -790,16 +930,20 @@ export class ExplorationBot {
       }
 
       // Ensure current position is in known cells
-      const currentKey = `${data.position.x},${data.position.y}`;
-      if (!this.knownCells.has(currentKey)) {
-        this.knownCells.set(currentKey, {
+      if (!this.knownCells.has(newKey)) {
+        this.knownCells.set(newKey, {
           x: data.position.x,
           y: data.position.y,
           type: data.position.type,
           zone: data.position.zone,
           state: 'KNOWN'
         });
+      } else {
+        this.knownCells.get(newKey).state = 'KNOWN';
       }
+
+      // Reset stuck counter on successful move
+      this.stuckCounter = 0;
 
       // Cooldown
       await this.sleep(this.shipSpeed + this.config.moveDelay);
@@ -818,7 +962,6 @@ export class ExplorationBot {
 
       this.log(`❌ Mouvement ${direction} échoué: [${errorCode}] ${errorMsg}`, 'error');
 
-      // Marquer direction bloquée si erreur de mouvement
       if (errorMsg.toLowerCase().includes('impossible') ||
           errorMsg.toLowerCase().includes('blocked') ||
           errorMsg.toLowerCase().includes('cannot') ||
@@ -836,7 +979,6 @@ export class ExplorationBot {
             const targetKey = `${this.currentPosition.x + vec.dx},${this.currentPosition.y + vec.dy}`;
             const targetCell = this.knownCells.get(targetKey);
             if (targetCell) {
-              // Marquer la zone comme trop haute (on met shipLevelNumber + 1 pour qu'elle soit bloquée)
               targetCell.zone = this.shipLevelNumber + 1;
               this.log(`🚫 Zone trop élevée marquée à ${targetKey}`, 'warn');
             }
@@ -866,13 +1008,11 @@ export class ExplorationBot {
         cell.state = 'SEEN';
         this.knownCells.set(key, { ...cell });
       } else {
-        // Si on est SUR la cellule, elle devient KNOWN
         if (this.currentPosition &&
             cell.x === this.currentPosition.x &&
             cell.y === this.currentPosition.y) {
           existing.state = 'KNOWN';
         }
-        // Mettre à jour la zone si on ne l'avait pas
         if (cell.zone !== undefined && existing.zone === undefined) {
           existing.zone = cell.zone;
         }
@@ -883,7 +1023,6 @@ export class ExplorationBot {
       this.log(`📦 ${newCellsCount} nouvelles | ${seaCells.length}🌊 ${sandCells.length}🏝️ ${rockCells.length}🪨`);
     }
 
-    // Sauvegarder dans le mapStore
     await this.mapStore.addCells(cells, 'SEEN');
 
     // Détecter nouvelles îles
