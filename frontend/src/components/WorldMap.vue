@@ -80,7 +80,7 @@ const draw = () => {
 
   // World offset: camera is center of screen
   const offsetX = w / 2 - camera.value.x * z;
-  const offsetY = h / 2 + camera.value.y * z;
+  const offsetY = h / 2 - camera.value.y * z;
 
   // Visible range in cell coords
   const minCellX = Math.floor((camera.value.x * z - w / 2) / cellPx) - 1;
@@ -92,7 +92,7 @@ const draw = () => {
   for (let cy = minCellY; cy <= maxCellY; cy++) {
     for (let cx = minCellX; cx <= maxCellX; cx++) {
       const screenX = offsetX + cx * cellPx;
-      const screenY = offsetY - (cy + 1) * cellPx; // Y inverted: up = positive
+      const screenY = offsetY + cy * cellPx;
 
       const cell = mapStore.getCellAt(cx, cy);
 
@@ -134,7 +134,7 @@ const draw = () => {
   // Draw player ship
   if (shipPosition.value) {
     const sx = offsetX + shipPosition.value.x * cellPx;
-    const sy = offsetY - (shipPosition.value.y + 1) * cellPx;
+    const sy = offsetY + shipPosition.value.y * cellPx;
 
     // Glow
     ctx.shadowColor = '#e94560';
@@ -163,7 +163,7 @@ const draw = () => {
       ctx.stroke();
     }
     for (let cy = minCellY; cy <= maxCellY; cy++) {
-      const y = offsetY - cy * cellPx;
+      const y = offsetY + cy * cellPx;
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(w, y);
@@ -206,7 +206,7 @@ const onDrag = (e) => {
 
   camera.value = {
     x: camera.value.x - dx / zoomLevel.value,
-    y: camera.value.y + dy / zoomLevel.value
+    y: camera.value.y - dy / zoomLevel.value
   };
 
   velocity.value = { x: dx, y: dy };
@@ -228,7 +228,7 @@ const endDrag = () => {
 
     camera.value = {
       x: camera.value.x - velocity.value.x / zoomLevel.value,
-      y: camera.value.y + velocity.value.y / zoomLevel.value
+      y: camera.value.y - velocity.value.y / zoomLevel.value
     };
 
     velocity.value = {
@@ -298,7 +298,7 @@ const onMouseMove = (e) => {
   const offsetY = canvas.height / 2 + camera.value.y * z;
 
   const cellX = Math.floor((mx - offsetX) / cellPx);
-  const cellY = -Math.floor((my - offsetY) / cellPx) - 1;
+  const cellY = Math.floor((my - offsetY) / cellPx);
 
   const cell = mapStore.getCellAt(cellX, cellY);
   hoveredCell.value = { x: cellX, y: cellY, cell };
@@ -320,6 +320,22 @@ const centerOnShip = () => {
     mapStore.centerOnShip();
     draw();
   }
+};
+
+const isFullscreen = ref(false);
+const mapRoot = ref(null);
+
+const toggleFullscreen = () => {
+  if (!document.fullscreenElement) {
+    mapRoot.value?.requestFullscreen();
+  } else {
+    document.exitFullscreen();
+  }
+};
+
+const onFullscreenChange = () => {
+  isFullscreen.value = !!document.fullscreenElement;
+  nextTick(resizeCanvas);
 };
 
 const reloadMap = () => {
@@ -366,16 +382,18 @@ onMounted(async () => {
 
   resizeObserver = new ResizeObserver(resizeCanvas);
   if (containerRef.value) resizeObserver.observe(containerRef.value);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
 });
 
 onUnmounted(() => {
   if (animFrameId) cancelAnimationFrame(animFrameId);
   if (resizeObserver) resizeObserver.disconnect();
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
 });
 </script>
 
 <template>
-  <div class="world-map card">
+  <div ref="mapRoot" :class="['world-map', 'card', { fullscreen: isFullscreen }]">
     <div class="map-header">
       <h2>Carte du Monde</h2>
       <div class="map-controls">
@@ -387,6 +405,9 @@ onUnmounted(() => {
         </button>
         <button class="control-btn reload" @click="reloadMap" title="Recharger depuis DB">
           🔄
+        </button>
+        <button class="control-btn fullscreen" @click="toggleFullscreen" :title="isFullscreen ? 'Quitter plein ecran' : 'Plein ecran'">
+          {{ isFullscreen ? '⛶' : '⛶' }}
         </button>
       </div>
     </div>
@@ -613,11 +634,31 @@ h2 {
   border-radius: 10px;
   overflow: hidden;
   cursor: grab;
-  min-height: 500px;
-  height: 500px;
+  min-height: 700px;
+  height: 700px;
   position: relative;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.fullscreen {
+  background: #0a0a0f;
+  border-radius: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.fullscreen .map-container {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.control-btn.fullscreen:hover {
+  background: #6366f1;
+  border-color: #6366f1;
 }
 
 .map-container:active {
