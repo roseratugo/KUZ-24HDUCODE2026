@@ -9,104 +9,106 @@ export class IslandManager {
     this.scene = scene;
     this.cellSize = cellSize;
     this.islandMeshes = new Map(); // clusterId -> THREE.Group
-    this.processedCells = new Set();
-    this.sandCells = new Map(); // "x,y" -> cell (all SAND cells)
-    this.clusterMap = new Map(); // "x,y" -> clusterId
-    this.clusters = new Map(); // clusterId -> { cells: [], names: Set }
-    this.nextClusterId = 0;
+    this.sandCells = new Map(); // "x,y" -> cell
+    this.dirty = false;
     this.rebuildTimer = null;
+    this.lastClusterCount = 0;
   }
 
   addCell(cell) {
-    const key = `${cell.x},${cell.y}`;
-    if (this.processedCells.has(key)) return;
-    this.processedCells.add(key);
-
     if (cell.type !== 'SAND' && !cell.island) return;
+    const key = `${cell.x},${cell.y}`;
+    if (this.sandCells.has(key)) return;
 
     this.sandCells.set(key, cell);
-
-    // Find adjacent clusters
-    const neighbors = [
-      `${cell.x - 1},${cell.y}`, `${cell.x + 1},${cell.y}`,
-      `${cell.x},${cell.y - 1}`, `${cell.x},${cell.y + 1}`,
-      `${cell.x - 1},${cell.y - 1}`, `${cell.x + 1},${cell.y - 1}`,
-      `${cell.x - 1},${cell.y + 1}`, `${cell.x + 1},${cell.y + 1}`
-    ];
-
-    const adjacentClusterIds = new Set();
-    for (const nk of neighbors) {
-      if (this.clusterMap.has(nk)) {
-        adjacentClusterIds.add(this.clusterMap.get(nk));
-      }
-    }
-
-    if (adjacentClusterIds.size === 0) {
-      // New cluster
-      const id = this.nextClusterId++;
-      this.clusterMap.set(key, id);
-      this.clusters.set(id, {
-        cells: [cell],
-        names: new Set(cell.island ? [cell.island.name] : [])
-      });
-      this.scheduleRebuild(id);
-    } else if (adjacentClusterIds.size === 1) {
-      // Join existing cluster
-      const id = adjacentClusterIds.values().next().value;
-      this.clusterMap.set(key, id);
-      this.clusters.get(id).cells.push(cell);
-      if (cell.island) this.clusters.get(id).names.add(cell.island.name);
-      this.scheduleRebuild(id);
-    } else {
-      // Merge multiple clusters
-      const ids = [...adjacentClusterIds];
-      const mainId = ids[0];
-      const mainCluster = this.clusters.get(mainId);
-
-      for (let i = 1; i < ids.length; i++) {
-        const mergeId = ids[i];
-        const mergeCluster = this.clusters.get(mergeId);
-        if (!mergeCluster) continue;
-
-        // Move all cells to main cluster
-        for (const c of mergeCluster.cells) {
-          mainCluster.cells.push(c);
-          this.clusterMap.set(`${c.x},${c.y}`, mainId);
-        }
-        for (const n of mergeCluster.names) mainCluster.names.add(n);
-
-        // Remove old mesh
-        if (this.islandMeshes.has(mergeId)) {
-          const old = this.islandMeshes.get(mergeId);
-          this.scene.remove(old);
-          old.traverse(child => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-              if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-              else child.material.dispose();
-            }
-          });
-          this.islandMeshes.delete(mergeId);
-        }
-        this.clusters.delete(mergeId);
-      }
-
-      // Add new cell
-      this.clusterMap.set(key, mainId);
-      mainCluster.cells.push(cell);
-      if (cell.island) mainCluster.names.add(cell.island.name);
-      this.scheduleRebuild(mainId);
-    }
+    this.dirty = true;
+    this.scheduleRebuild();
   }
 
-  scheduleRebuild(clusterId) {
-    // Debounce rebuilds — wait 200ms for more cells to arrive
+  scheduleRebuild() {
     if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
     this.rebuildTimer = setTimeout(() => {
-      for (const [id] of this.clusters) {
-        this.rebuildCluster(id);
+      if (!this.dirty) return;
+      this.dirty = false;
+      this.rebuildAll();
+    }, 500);
+  }
+
+  // Flood-fill to find connected clusters of SAND cells
+  findClusters() {
+    const visited = new Set();
+    const clusters = [];
+
+    for (const [key, cell] of this.sandCells) {
+      if (visited.has(key)) continue;
+
+      // BFS flood fill
+      const cluster = [];
+      const queue = [key];
+      visited.add(key);
+
+      while (queue.length > 0) {
+        const k = queue.shift();
+        const c = this.sandCells.get(k);
+        if (c) cluster.push(c);
+
+        const [cx, cy] = k.split(',').map(Number);
+        const neighbors = [
+          `${cx - 1},${cy}`, `${cx + 1},${cy}`,
+          `${cx},${cy - 1}`, `${cx},${cy + 1}`,
+          `${cx - 1},${cy - 1}`, `${cx + 1},${cy - 1}`,
+          `${cx - 1},${cy + 1}`, `${cx + 1},${cy + 1}`
+        ];
+
+        for (const nk of neighbors) {
+          if (!visited.has(nk) && this.sandCells.has(nk)) {
+            visited.add(nk);
+            queue.push(nk);
+          }
+        }
       }
-    }, 200);
+
+      if (cluster.length > 0) {
+        clusters.push(cluster);
+      }
+    }
+
+    return clusters;
+  }
+
+  rebuildAll() {
+    const clusters = this.findClusters();
+
+    // Skip if same number of clusters (no structural change)
+    if (clusters.length === this.lastClusterCount) {
+      // Check if any cluster grew
+      let totalCells = 0;
+      for (const c of clusters) totalCells += c.length;
+      let oldTotal = 0;
+      for (const [, mesh] of this.islandMeshes) oldTotal += (mesh.userData.cellCount || 0);
+      if (totalCells === oldTotal) return;
+    }
+
+    // Clear all existing meshes
+    for (const [, mesh] of this.islandMeshes) {
+      this.scene.remove(mesh);
+      mesh.traverse(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+          else child.material.dispose();
+        }
+      });
+    }
+    this.islandMeshes.clear();
+
+    // Build each cluster
+    clusters.forEach((cells, i) => {
+      this.rebuildCluster(i, cells);
+    });
+
+    this.lastClusterCount = clusters.length;
+    console.log(`Built ${clusters.length} island(s) from ${this.sandCells.size} sand cells`);
   }
 
   getCoastDist(px, pz, worldRadius, seed) {
@@ -144,26 +146,14 @@ export class IslandManager {
     return height;
   }
 
-  rebuildCluster(clusterId) {
-    if (this.islandMeshes.has(clusterId)) {
-      const old = this.islandMeshes.get(clusterId);
-      this.scene.remove(old);
-      old.traverse(child => {
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-          else child.material.dispose();
-        }
-      });
-    }
-
-    const data = this.clusters.get(clusterId);
-    if (!data || data.cells.length === 0) return;
+  rebuildCluster(clusterId, cells) {
+    if (!cells || cells.length === 0) return;
 
     const group = new THREE.Group();
+    group.userData.cellCount = cells.length;
 
-    const xs = data.cells.map(c => c.x);
-    const ys = data.cells.map(c => c.y);
+    const xs = cells.map(c => c.x);
+    const ys = cells.map(c => c.y);
     const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
     const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
     const spanX = Math.max(...xs) - Math.min(...xs) + 1;
