@@ -369,6 +369,9 @@ export class ExplorationBot {
     this.discoveredIslands = discoveredIslands
       .filter(i => i.islandState === 'DISCOVERED')
       .map(i => i.island);
+
+    // Synchroniser les états des îles dans notre BDD locale
+    await this.mapStore.syncIslandStates(discoveredIslands);
   }
 
   decideNextAction() {

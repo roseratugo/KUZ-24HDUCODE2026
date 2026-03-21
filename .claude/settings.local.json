@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/zaki7/Documents/24h/KUZ-24HDUCODE2026 -type f -name *migration* -o -name *seed* -o -name *script*)"
+    ]
+  }
+}
