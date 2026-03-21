@@ -69,7 +69,10 @@ const getCellClass = (item) => {
       classes.push(`state-${item.cell.state.toLowerCase()}`);
     }
     if (item.cell.island) {
+      const islandData = mapStore.islands.get(item.cell.island.id);
+      const islandState = islandData?.state || 'DISCOVERED';
       classes.push('has-island');
+      classes.push(islandState === 'KNOWN' ? 'island-known' : 'island-discovered');
     }
   }
   if (item.isShip) {
@@ -271,6 +274,14 @@ onMounted(async () => {
       <div class="legend-item">
         <span class="legend-color sand"></span>
         <span>Plage</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-color island-known"></span>
+        <span>Île confirmée</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-color island-discovered"></span>
+        <span>Île en attente</span>
       </div>
       <div class="legend-item">
         <span class="legend-color rocks"></span>
@@ -492,8 +503,18 @@ h2 {
   background: #57534e;
 }
 
-.cell.has-island {
-  border: 1px solid #22c55e;
+/* Île confirmée (KNOWN) → vert vif */
+.cell.has-island.island-known {
+  background: #22c55e !important;
+  border: 2px solid #86efac;
+  box-shadow: 0 0 5px rgba(34, 197, 94, 0.6);
+}
+
+/* Île en attente de confirmation (DISCOVERED) → jaune vif */
+.cell.has-island.island-discovered {
+  background: #eab308 !important;
+  border: 2px solid #fde047;
+  box-shadow: 0 0 5px rgba(234, 179, 8, 0.6);
 }
 
 .cell.state-seen {
@@ -587,6 +608,16 @@ h2 {
 
 .legend-color.sand {
   background: #d97706;
+}
+
+.legend-color.island-known {
+  background: #22c55e;
+  border: 2px solid #86efac;
+}
+
+.legend-color.island-discovered {
+  background: #eab308;
+  border: 2px solid #fde047;
 }
 
 .legend-color.rocks {
