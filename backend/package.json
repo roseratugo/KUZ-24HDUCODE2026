@@ -1,0 +1,16 @@
+{
+  "name": "kuz-3026-backend",
+  "version": "1.0.0",
+  "description": "Backend API for 3026 game - Map persistence with MongoDB",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "mongoose": "^8.0.3"
+  }
+}
