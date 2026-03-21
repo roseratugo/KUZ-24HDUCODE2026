@@ -4,7 +4,8 @@ const GAME_ID = 'kuz-team';
 
 const client = axios.create({
   baseURL: '/backend-api',
-  headers: { 'Content-Type': 'application/json' }
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 3000
 });
 
 export async function fetchCells() {
