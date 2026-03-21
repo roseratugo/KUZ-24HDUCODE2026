@@ -1,8 +1,7 @@
 import axios from 'axios';
 import { CREDENTIALS } from './config';
 
-const isDev = import.meta.env.DEV;
-const baseURL = isDev ? '/api' : 'http://ec2-15-237-116-133.eu-west-3.compute.amazonaws.com:8443';
+const baseURL = '/api';
 
 const apiClient = axios.create({
   baseURL,
