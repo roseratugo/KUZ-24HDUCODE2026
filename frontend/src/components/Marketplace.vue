@@ -223,8 +223,8 @@ const updatePriceHistory = async () => {
 
       priceHistory.value[type].push(entry);
 
-      // Garder les 50 derniers points en local
-      if (priceHistory.value[type].length > 50) {
+      // Garder les 500 derniers points en local pour le graphique
+      if (priceHistory.value[type].length > 500) {
         priceHistory.value[type].shift();
       }
 
@@ -253,10 +253,19 @@ const loadPriceHistory = async () => {
     const response = await pricesApi.getAll();
     const dbHistory = response.data;
 
-    // Merge DB history with local format
+    // Merge DB history with local format (sous-echantillonnage pour le graphique)
+    const maxPoints = 500;
     for (const type of ['BOISIUM', 'FERONIUM', 'CHARBONIUM']) {
       if (dbHistory[type] && dbHistory[type].length > 0) {
-        priceHistory.value[type] = dbHistory[type].map(h => ({
+        let data = dbHistory[type];
+
+        // Sous-echantillonner si trop de donnees pour le graphique
+        if (data.length > maxPoints) {
+          const step = Math.ceil(data.length / maxPoints);
+          data = data.filter((_, i) => i % step === 0 || i === data.length - 1);
+        }
+
+        priceHistory.value[type] = data.map(h => ({
           time: new Date(h.time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
           avg: h.avg,
           min: h.min,
@@ -377,6 +386,34 @@ const getResourceStyle = (type) => {
 
 const totalPrice = (offer, qty) => {
   return (qty || 1) * offer.pricePerResource;
+};
+
+const getMaxQuantity = (offer) => {
+  const maxAffordable = Math.floor(playerMoney.value / offer.pricePerResource);
+  return Math.min(maxAffordable, offer.quantityIn);
+};
+
+const getMaxPurchaseInfo = (offer) => {
+  const max = getMaxQuantity(offer);
+  if (max === 0) return 'Solde insuffisant';
+  return `Acheter ${max} pour ${max * offer.pricePerResource} 💰`;
+};
+
+const purchaseMax = async (offer) => {
+  const maxQty = getMaxQuantity(offer);
+  if (maxQty < 1) {
+    error.value = 'Solde insuffisant';
+    return;
+  }
+  error.value = null;
+  try {
+    await marketplaceApi.purchase(offer.id, maxQty);
+    await fetchOffers();
+    await playerStore.refreshAll();
+  } catch (err) {
+    error.value = err.response?.data?.message || 'Erreur lors de l\'achat';
+    console.error('Error purchasing max:', err);
+  }
 };
 
 const getPriceChange = (type) => {
@@ -581,14 +618,24 @@ onUnmounted(() => {
                       = {{ totalPrice(offer, purchaseQuantity[offer.id] || 1) }} 💰
                     </span>
                   </div>
-                  <button
-                    class="buy-btn"
-                    @click="purchaseOffer(offer)"
-                    :disabled="playerMoney < totalPrice(offer, purchaseQuantity[offer.id] || 1)"
-                    :title="playerMoney < totalPrice(offer, purchaseQuantity[offer.id] || 1) ? 'Solde insuffisant' : ''"
-                  >
-                    Acheter
-                  </button>
+                  <div class="buy-buttons">
+                    <button
+                      class="buy-btn"
+                      @click="purchaseOffer(offer)"
+                      :disabled="playerMoney < totalPrice(offer, purchaseQuantity[offer.id] || 1)"
+                      :title="playerMoney < totalPrice(offer, purchaseQuantity[offer.id] || 1) ? 'Solde insuffisant' : ''"
+                    >
+                      Acheter
+                    </button>
+                    <button
+                      class="buy-btn buy-max-btn"
+                      @click="purchaseMax(offer)"
+                      :disabled="playerMoney < offer.pricePerResource"
+                      :title="getMaxPurchaseInfo(offer)"
+                    >
+                      Max ({{ getMaxQuantity(offer) }})
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1224,6 +1271,23 @@ onUnmounted(() => {
 .buy-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.buy-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.buy-max-btn {
+  background: linear-gradient(135deg, #0f3460 0%, #1a1a2e 100%);
+  border: 1px solid #e94560;
+  font-size: 0.75rem;
+  padding: 6px 8px;
+}
+
+.buy-max-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
+  border-color: #ff6b8a;
 }
 
 .loading-orders, .no-orders {
