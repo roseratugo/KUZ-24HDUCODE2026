@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia';
 import { cellsApi, islandsApi, statsApi } from '../api/mapApi';
 
+let ws = null;
+let reconnectTimer = null;
+
 export const useMapStore = defineStore('map', {
   state: () => ({
     cells: new Map(),
@@ -15,7 +18,8 @@ export const useMapStore = defineStore('map', {
     loading: false,
     syncing: false,
     lastSync: null,
-    error: null
+    error: null,
+    wsConnected: false
   }),
 
   getters: {
@@ -202,6 +206,74 @@ export const useMapStore = defineStore('map', {
       } catch (err) {
         console.error('Failed to fetch stats:', err);
       }
+    },
+
+    connectWebSocket() {
+      if (ws) return;
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${protocol}//${window.location.host}/ws`;
+
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        this.wsConnected = true;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const { event: evt, data } = JSON.parse(event.data);
+
+          if (evt === 'cells:update' && data.cells) {
+            data.cells.forEach(cell => {
+              const key = `${cell.x},${cell.y}`;
+              const existing = this.cells.get(key);
+              if (!existing) {
+                this.cells.set(key, { ...cell, state: 'SEEN' });
+              }
+            });
+          }
+
+          if (evt === 'island:update' && data.island) {
+            const island = data.island;
+            this.islands.set(island.islandId, island);
+          }
+
+          if (evt === 'ship:position' && data.position) {
+            this.shipPosition = data.position;
+          }
+        } catch (err) {
+          console.error('WebSocket message error:', err);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected, reconnecting in 3s...');
+        this.wsConnected = false;
+        ws = null;
+        reconnectTimer = setTimeout(() => this.connectWebSocket(), 3000);
+      };
+
+      ws.onerror = () => {
+        ws?.close();
+      };
+    },
+
+    disconnectWebSocket() {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      this.wsConnected = false;
     }
   }
 });

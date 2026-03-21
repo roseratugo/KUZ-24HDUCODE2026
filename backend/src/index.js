@@ -1,13 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
+import { createServer } from 'http';
 import cellRoutes from './routes/cells.js';
 import islandRoutes from './routes/islands.js';
 import moveRoutes from './routes/moves.js';
 import shipPositionRoutes from './routes/shipPosition.js';
 import priceHistoryRoutes from './routes/priceHistory.js';
+import { setupWebSocket } from './ws.js';
 
 const app = express();
+const server = createServer(app);
 const PORT = process.env.PORT || 3001;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/kuz3026';
 
@@ -50,6 +53,8 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+setupWebSocket(server);
+
+server.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
 });

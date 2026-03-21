@@ -372,6 +372,7 @@ let resizeObserver = null;
 
 onMounted(async () => {
   await mapStore.loadFromDB();
+  mapStore.connectWebSocket();
   if (shipStore.position) {
     camera.value = {
       x: shipStore.position.x * CELL_SIZE,
@@ -391,6 +392,7 @@ onUnmounted(() => {
   if (animFrameId) cancelAnimationFrame(animFrameId);
   if (resizeObserver) resizeObserver.disconnect();
   document.removeEventListener('fullscreenchange', onFullscreenChange);
+  mapStore.disconnectWebSocket();
 });
 </script>
 
@@ -438,6 +440,10 @@ onUnmounted(() => {
       <span v-else-if="lastSync" class="stat synced">
         <span class="stat-icon">✅</span>
         {{ formatTime(lastSync) }}
+      </span>
+      <span :class="['stat', mapStore.wsConnected ? 'synced' : 'syncing']">
+        <span class="stat-icon">{{ mapStore.wsConnected ? '🟢' : '🔴' }}</span>
+        WS
       </span>
     </div>
 
