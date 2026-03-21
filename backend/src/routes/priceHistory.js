@@ -6,10 +6,13 @@ const router = express.Router();
 // Get price history for a game (all resources)
 router.get('/:gameId', async (req, res) => {
   try {
-    const { limit = 100 } = req.query;
-    const history = await PriceHistory.find({ gameId: req.params.gameId })
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit));
+    const { hours = 24 } = req.query;
+    const since = new Date(Date.now() - parseInt(hours) * 60 * 60 * 1000);
+
+    const history = await PriceHistory.find({
+      gameId: req.params.gameId,
+      timestamp: { $gte: since }
+    }).sort({ timestamp: -1 });
 
     // Group by resource type
     const grouped = {
@@ -45,13 +48,14 @@ router.get('/:gameId', async (req, res) => {
 // Get price history for a specific resource
 router.get('/:gameId/:resourceType', async (req, res) => {
   try {
-    const { limit = 100 } = req.query;
+    const { hours = 24 } = req.query;
+    const since = new Date(Date.now() - parseInt(hours) * 60 * 60 * 1000);
+
     const history = await PriceHistory.find({
       gameId: req.params.gameId,
-      resourceType: req.params.resourceType
-    })
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit));
+      resourceType: req.params.resourceType,
+      timestamp: { $gte: since }
+    }).sort({ timestamp: -1 });
 
     res.json(history.reverse().map(h => ({
       time: h.timestamp,
