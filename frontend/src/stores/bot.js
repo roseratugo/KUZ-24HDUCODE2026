@@ -19,7 +19,7 @@ export const useBotStore = defineStore('bot', () => {
       name: 'Cartographe',
       category: 'exploration',
       icon: '🗺️',
-      description: 'Explore automatiquement la carte, découvre les îles et gère l\'énergie pour ne jamais se bloquer. Retourne sur les îles connues pour valider les découvertes.',
+      description: 'Exploration BFS par frontières : découvre un maximum de cases en un minimum de mouvements. Gestion intelligente de l\'énergie et évitement automatique des zones de niveau supérieur.',
       isActive: false,
       isAvailable: true,
       startTime: null,
@@ -31,9 +31,9 @@ export const useBotStore = defineStore('bot', () => {
       maxEnergy: 0,
       status: 'stopped', // stopped, running, paused
       config: {
-        'Pattern': 'Linéaire',
-        'Énergie réserve': '3',
-        'Délai (ms)': '100'
+        'Buffer sécurité': '3',
+        'Délai (ms)': '100',
+        'Diagonales': 'Non'
       }
     },
     // Bots futurs - Non disponibles pour l'instant
@@ -140,24 +140,15 @@ export const useBotStore = defineStore('bot', () => {
     const mapStore = useMapStore();
     const playerStore = usePlayerStore();
 
-    // Convertir le pattern en format interne
-    const patternMap = {
-      'linéaire': 'linear',
-      'lineaire': 'linear',
-      'linear': 'linear',
-      'spirale': 'spiral',
-      'spiral': 'spiral',
-      'aléatoire': 'random',
-      'aleatoire': 'random',
-      'random': 'random'
-    };
-    const pattern = patternMap[bot.config['Pattern']?.toLowerCase()] || 'linear';
+    // Créer l'instance du bot avec algorithme BFS frontière
+    const useDiagonals = ['oui', 'yes', 'true', '1'].includes(
+      (bot.config['Diagonales'] || 'non').toLowerCase()
+    );
 
-    // Créer l'instance du bot
     const explorationBot = new ExplorationBot({
-      minEnergyReserve: parseInt(bot.config['Énergie réserve']) || 3,
+      safetyBuffer: parseInt(bot.config['Buffer sécurité']) || 3,
       moveDelay: parseInt(bot.config['Délai (ms)']) || 100,
-      explorationPattern: pattern
+      useDiagonals
     });
 
     // Initialiser les logs
