@@ -53,6 +53,16 @@ services:
     depends_on:
       - backend
 
+  frontend-3d:
+    image: ghcr.io/roseratugo/kuz-frontend-3d:latest
+    container_name: kuz-frontend-3d
+    restart: unless-stopped
+    networks:
+      - kuz-network
+      - proxy_net
+    depends_on:
+      - backend
+
 networks:
   kuz-network:
     driver: bridge
