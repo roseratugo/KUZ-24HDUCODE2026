@@ -1,10 +1,9 @@
 import axios from 'axios';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 const GAME_ID = import.meta.env.VITE_GAME_ID || 'kuz-default';
 
 const mapClient = axios.create({
-  baseURL: `${BACKEND_URL}/api`,
+  baseURL: '/backend-api',
   headers: {
     'Content-Type': 'application/json'
   }
