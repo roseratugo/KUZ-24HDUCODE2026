@@ -32,7 +32,7 @@ const visibleCells = computed(() => {
   const cy = viewCenter.value.y;
   const radius = Math.ceil(VISIBLE_RADIUS / zoom.value);
 
-  for (let y = cy + radius; y >= cy - radius; y--) {
+  for (let y = cy - radius; y <= cy + radius; y++) {
     for (let x = cx - radius; x <= cx + radius; x++) {
       const cell = mapStore.getCellAt(x, y);
       result.push({
