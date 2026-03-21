@@ -1,153 +1,329 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useMapStore } from '../stores/map';
 import { useShipStore } from '../stores/ship';
 
 const mapStore = useMapStore();
 const shipStore = useShipStore();
 
+const canvasRef = ref(null);
 const containerRef = ref(null);
+
+const CELL_SIZE = 28;
+
+// Camera state (in world pixels)
+const camera = ref({ x: 0, y: 0 });
+const zoomLevel = ref(1);
+
+// Drag state
 const isDragging = ref(false);
 const dragStart = ref({ x: 0, y: 0 });
+const lastMouse = ref({ x: 0, y: 0 });
 
-const CELL_SIZE = 24;
-const VISIBLE_RADIUS = 15;
+// Inertia
+const velocity = ref({ x: 0, y: 0 });
+let animFrameId = null;
 
 const cells = computed(() => mapStore.allCells);
 const shipPosition = computed(() => mapStore.shipPosition);
-const zoom = computed(() => mapStore.viewSettings.zoom);
 const loading = computed(() => mapStore.loading);
 const syncing = computed(() => mapStore.syncing);
 const lastSync = computed(() => mapStore.lastSync);
 const islandCount = computed(() => mapStore.islandCount);
 
-const viewCenter = computed(() => ({
-  x: mapStore.viewSettings.centerX,
-  y: mapStore.viewSettings.centerY
-}));
-
-const visibleCells = computed(() => {
-  const result = [];
-  const cx = viewCenter.value.x;
-  const cy = viewCenter.value.y;
-  const radius = Math.ceil(VISIBLE_RADIUS / zoom.value);
-
-  for (let y = cy - radius; y <= cy + radius; y++) {
-    for (let x = cx - radius; x <= cx + radius; x++) {
-      const cell = mapStore.getCellAt(x, y);
-      result.push({
-        x,
-        y,
-        cell,
-        isShip: shipPosition.value && shipPosition.value.x === x && shipPosition.value.y === y
-      });
-    }
-  }
-  return result;
+const viewCenter = computed(() => {
+  const cellPx = CELL_SIZE * zoomLevel.value;
+  return {
+    x: Math.round(camera.value.x / cellPx),
+    y: Math.round(camera.value.y / cellPx)
+  };
 });
 
-const gridColumns = computed(() => {
-  const radius = Math.ceil(VISIBLE_RADIUS / zoom.value);
-  return radius * 2 + 1;
-});
-
-const cellStyle = computed(() => ({
-  width: `${CELL_SIZE * zoom.value}px`,
-  height: `${CELL_SIZE * zoom.value}px`
-}));
-
-const getCellClass = (item) => {
-  const classes = ['cell'];
-  if (!item.cell || !item.cell.type) {
-    classes.push('unknown');
-  } else {
-    classes.push(item.cell.type.toLowerCase());
-    if (item.cell.zone !== undefined && item.cell.zone !== null) {
-      classes.push(`zone-${item.cell.zone}`);
-    }
-    if (item.cell.state) {
-      classes.push(`state-${item.cell.state.toLowerCase()}`);
-    }
-    if (item.cell.island) {
-      const islandData = mapStore.islands.get(item.cell.island.id);
-      classes.push('has-island');
-      // DISCOVERED (en attente) → jaune | VALIDATED ou autre état confirmé → vert
-      classes.push((!islandData || islandData.state === 'DISCOVERED') ? 'island-discovered' : 'island-known');
-    }
-  }
-  if (item.isShip) {
-    classes.push('ship');
-  }
-  return classes;
+const cellColors = {
+  SEA: {
+    1: '#7dd3fc',
+    2: '#2563eb',
+    3: '#1d4ed8',
+    4: '#1e3a8a',
+    5: '#172554',
+    default: '#1e40af'
+  },
+  SAND: '#d97706',
+  ROCKS: '#57534e'
 };
 
-const getCellTitle = (item) => {
-  let title = `(${item.x}, ${item.y})`;
-  if (item.cell) {
-    title += ` - ${item.cell.type}`;
-    if (item.cell.island) {
-      title += ` - ${item.cell.island.name}`;
-    }
-    title += ` [Zone ${item.cell.zone}]`;
-  } else {
-    title += ' - Inconnu';
+const getCellColor = (cell) => {
+  if (!cell || !cell.type) return 'rgba(50, 50, 60, 0.3)';
+  if (cell.type === 'SEA') {
+    return cellColors.SEA[cell.zone] || cellColors.SEA.default;
   }
-  return title;
+  return cellColors[cell.type] || 'rgba(50, 50, 60, 0.3)';
 };
 
-const handleZoom = (delta) => {
-  mapStore.setZoom(zoom.value + delta);
+const getIslandColor = (cell) => {
+  if (!cell.island) return null;
+  const islandData = mapStore.islands.get(cell.island.id);
+  if (!islandData || islandData.state === 'DISCOVERED') return '#eab308';
+  return '#22c55e';
 };
+
+const draw = () => {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  const z = zoomLevel.value;
+  const cellPx = CELL_SIZE * z;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // World offset: camera is center of screen
+  const offsetX = w / 2 - camera.value.x * z;
+  const offsetY = h / 2 + camera.value.y * z;
+
+  // Visible range in cell coords
+  const minCellX = Math.floor((camera.value.x * z - w / 2) / cellPx) - 1;
+  const maxCellX = Math.ceil((camera.value.x * z + w / 2) / cellPx) + 1;
+  const minCellY = Math.floor((camera.value.y * z - h / 2) / cellPx) - 1;
+  const maxCellY = Math.ceil((camera.value.y * z + h / 2) / cellPx) + 1;
+
+  // Draw cells
+  for (let cy = minCellY; cy <= maxCellY; cy++) {
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      const screenX = offsetX + cx * cellPx;
+      const screenY = offsetY - (cy + 1) * cellPx; // Y inverted: up = positive
+
+      const cell = mapStore.getCellAt(cx, cy);
+
+      // Background
+      ctx.fillStyle = getCellColor(cell);
+      if (cell?.state === 'SEEN') ctx.globalAlpha = 0.7;
+      else if (cell?.state === 'VISITED') ctx.globalAlpha = 0.5;
+      else ctx.globalAlpha = 1;
+
+      ctx.fillRect(screenX, screenY, cellPx - 1, cellPx - 1);
+      ctx.globalAlpha = 1;
+
+      // Island overlay
+      if (cell?.island) {
+        const islandColor = getIslandColor(cell);
+        ctx.fillStyle = islandColor;
+        ctx.fillRect(screenX, screenY, cellPx - 1, cellPx - 1);
+        ctx.strokeStyle = islandColor === '#22c55e' ? '#86efac' : '#fde047';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(screenX + 1, screenY + 1, cellPx - 3, cellPx - 3);
+
+        // Island emoji
+        ctx.font = `${Math.max(10, cellPx * 0.4)}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🏝️', screenX + cellPx / 2, screenY + cellPx / 2);
+      }
+
+      // Other ships
+      if (cell?.ships?.length) {
+        ctx.font = `${Math.max(8, cellPx * 0.35)}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⛵', screenX + cellPx / 2, screenY + cellPx / 2);
+      }
+    }
+  }
+
+  // Draw player ship
+  if (shipPosition.value) {
+    const sx = offsetX + shipPosition.value.x * cellPx;
+    const sy = offsetY - (shipPosition.value.y + 1) * cellPx;
+
+    // Glow
+    ctx.shadowColor = '#e94560';
+    ctx.shadowBlur = 15;
+    ctx.strokeStyle = '#e94560';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx, sy, cellPx - 1, cellPx - 1);
+    ctx.shadowBlur = 0;
+
+    // Ship emoji
+    ctx.font = `${Math.max(12, cellPx * 0.5)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🚢', sx + cellPx / 2, sy + cellPx / 2);
+  }
+
+  // Grid lines (subtle)
+  if (z >= 0.8) {
+    ctx.strokeStyle = 'rgba(15, 52, 96, 0.3)';
+    ctx.lineWidth = 0.5;
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      const x = offsetX + cx * cellPx;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+    for (let cy = minCellY; cy <= maxCellY; cy++) {
+      const y = offsetY - cy * cellPx;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+  }
+};
+
+const resizeCanvas = () => {
+  const canvas = canvasRef.value;
+  const container = containerRef.value;
+  if (!canvas || !container) return;
+  canvas.width = container.clientWidth;
+  canvas.height = container.clientHeight;
+  draw();
+};
+
+// --- Input handlers ---
 
 const handleWheel = (e) => {
   e.preventDefault();
   const delta = e.deltaY > 0 ? -0.1 : 0.1;
-  handleZoom(delta);
+  zoomLevel.value = Math.max(0.3, Math.min(3, zoomLevel.value + delta));
+  mapStore.setZoom(zoomLevel.value);
+  draw();
 };
 
 const startDrag = (e) => {
+  e.preventDefault();
   isDragging.value = true;
   dragStart.value = { x: e.clientX, y: e.clientY };
+  lastMouse.value = { x: e.clientX, y: e.clientY };
+  velocity.value = { x: 0, y: 0 };
 };
 
 const onDrag = (e) => {
   if (!isDragging.value) return;
-  const dx = e.clientX - dragStart.value.x;
-  const dy = e.clientY - dragStart.value.y;
-  const sensitivity = 50 / zoom.value;
+  const dx = e.clientX - lastMouse.value.x;
+  const dy = e.clientY - lastMouse.value.y;
 
-  if (Math.abs(dx) > sensitivity) {
-    mapStore.setViewCenter(
-      viewCenter.value.x - Math.sign(dx),
-      viewCenter.value.y
-    );
-    dragStart.value.x = e.clientX;
-  }
-  if (Math.abs(dy) > sensitivity) {
-    mapStore.setViewCenter(
-      viewCenter.value.x,
-      viewCenter.value.y - Math.sign(dy)
-    );
-    dragStart.value.y = e.clientY;
-  }
+  camera.value = {
+    x: camera.value.x - dx / zoomLevel.value,
+    y: camera.value.y + dy / zoomLevel.value
+  };
+
+  velocity.value = { x: dx, y: dy };
+  lastMouse.value = { x: e.clientX, y: e.clientY };
+  draw();
 };
 
 const endDrag = () => {
+  if (!isDragging.value) return;
   isDragging.value = false;
+
+  // Inertia animation
+  const friction = 0.92;
+  const animate = () => {
+    if (Math.abs(velocity.value.x) < 0.5 && Math.abs(velocity.value.y) < 0.5) {
+      syncViewCenter();
+      return;
+    }
+
+    camera.value = {
+      x: camera.value.x - velocity.value.x / zoomLevel.value,
+      y: camera.value.y + velocity.value.y / zoomLevel.value
+    };
+
+    velocity.value = {
+      x: velocity.value.x * friction,
+      y: velocity.value.y * friction
+    };
+
+    draw();
+    animFrameId = requestAnimationFrame(animate);
+  };
+
+  if (Math.abs(velocity.value.x) > 2 || Math.abs(velocity.value.y) > 2) {
+    animFrameId = requestAnimationFrame(animate);
+  } else {
+    syncViewCenter();
+  }
+};
+
+const syncViewCenter = () => {
+  const cellPx = CELL_SIZE;
+  mapStore.setViewCenter(
+    Math.round(camera.value.x / cellPx),
+    Math.round(camera.value.y / cellPx)
+  );
+};
+
+// Touch support
+const handleTouchStart = (e) => {
+  if (e.touches.length === 1) {
+    const touch = e.touches[0];
+    startDrag({ clientX: touch.clientX, clientY: touch.clientY, preventDefault: () => {} });
+  }
+};
+
+const handleTouchMove = (e) => {
+  if (e.touches.length === 1) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    onDrag({ clientX: touch.clientX, clientY: touch.clientY });
+  }
+};
+
+const handleTouchEnd = () => {
+  endDrag();
+};
+
+// Hover tooltip
+const hoveredCell = ref(null);
+const tooltipPos = ref({ x: 0, y: 0 });
+
+const onMouseMove = (e) => {
+  if (isDragging.value) {
+    onDrag(e);
+    hoveredCell.value = null;
+    return;
+  }
+
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const z = zoomLevel.value;
+  const cellPx = CELL_SIZE * z;
+  const offsetX = canvas.width / 2 - camera.value.x * z;
+  const offsetY = canvas.height / 2 + camera.value.y * z;
+
+  const cellX = Math.floor((mx - offsetX) / cellPx);
+  const cellY = -Math.floor((my - offsetY) / cellPx) - 1;
+
+  const cell = mapStore.getCellAt(cellX, cellY);
+  hoveredCell.value = { x: cellX, y: cellY, cell };
+  tooltipPos.value = { x: e.clientX - rect.left + 15, y: e.clientY - rect.top - 10 };
+};
+
+const handleZoom = (delta) => {
+  zoomLevel.value = Math.max(0.3, Math.min(3, zoomLevel.value + delta));
+  mapStore.setZoom(zoomLevel.value);
+  draw();
 };
 
 const centerOnShip = () => {
-  mapStore.centerOnShip();
-};
-
-const clearMap = () => {
-  if (confirm('Effacer toutes les cellules de la base de donnees?')) {
-    mapStore.clearMap();
+  if (shipPosition.value) {
+    camera.value = {
+      x: shipPosition.value.x * CELL_SIZE,
+      y: shipPosition.value.y * CELL_SIZE
+    };
+    mapStore.centerOnShip();
+    draw();
   }
 };
 
 const reloadMap = () => {
-  mapStore.loadFromDB();
+  mapStore.loadFromDB().then(draw);
 };
 
 const formatTime = (isoString) => {
@@ -155,23 +331,46 @@ const formatTime = (isoString) => {
   return new Date(isoString).toLocaleTimeString('fr-FR');
 };
 
+// Watchers
 watch(() => shipStore.position, (newPos) => {
   if (newPos) {
     mapStore.updateShipPosition(newPos);
+    nextTick(draw);
   }
 }, { immediate: true });
 
 watch(() => shipStore.discoveredCells, (newCells) => {
   if (newCells && newCells.length) {
     mapStore.addCells(newCells, 'SEEN');
+    nextTick(draw);
   }
 }, { deep: true });
+
+watch(() => mapStore.allCells, () => {
+  draw();
+}, { deep: true });
+
+let resizeObserver = null;
 
 onMounted(async () => {
   await mapStore.loadFromDB();
   if (shipStore.position) {
+    camera.value = {
+      x: shipStore.position.x * CELL_SIZE,
+      y: shipStore.position.y * CELL_SIZE
+    };
     mapStore.centerOnShip();
   }
+  await nextTick();
+  resizeCanvas();
+
+  resizeObserver = new ResizeObserver(resizeCanvas);
+  if (containerRef.value) resizeObserver.observe(containerRef.value);
+});
+
+onUnmounted(() => {
+  if (animFrameId) cancelAnimationFrame(animFrameId);
+  if (resizeObserver) resizeObserver.disconnect();
 });
 </script>
 
@@ -181,7 +380,7 @@ onMounted(async () => {
       <h2>Carte du Monde</h2>
       <div class="map-controls">
         <button class="control-btn" @click="handleZoom(-0.2)" title="Zoom -">-</button>
-        <span class="zoom-level">{{ Math.round(zoom * 100) }}%</span>
+        <span class="zoom-level">{{ Math.round(zoomLevel * 100) }}%</span>
         <button class="control-btn" @click="handleZoom(0.2)" title="Zoom +">+</button>
         <button class="control-btn center" @click="centerOnShip" title="Centrer sur le bateau">
           🎯
@@ -230,42 +429,39 @@ onMounted(async () => {
       class="map-container"
       @wheel="handleWheel"
       @mousedown="startDrag"
-      @mousemove="onDrag"
+      @mousemove="onMouseMove"
       @mouseup="endDrag"
       @mouseleave="endDrag"
+      @touchstart="handleTouchStart"
+      @touchmove="handleTouchMove"
+      @touchend="handleTouchEnd"
     >
+      <canvas ref="canvasRef"></canvas>
+
       <div
-        class="map-grid"
-        :style="{
-          gridTemplateColumns: `repeat(${gridColumns}, ${CELL_SIZE * zoom}px)`,
-          gridTemplateRows: `repeat(${gridColumns}, ${CELL_SIZE * zoom}px)`
-        }"
+        v-if="hoveredCell && !isDragging"
+        class="tooltip"
+        :style="{ left: tooltipPos.x + 'px', top: tooltipPos.y + 'px' }"
       >
-        <div
-          v-for="(item, index) in visibleCells"
-          :key="`${item.x}-${item.y}`"
-          :class="getCellClass(item)"
-          :style="cellStyle"
-          :title="getCellTitle(item)"
-        >
-          <span v-if="item.isShip" class="ship-marker">🚢</span>
-          <span v-else-if="item.cell?.ships?.length" class="other-ship">⛵</span>
-          <span v-else-if="item.cell?.island" class="island-marker">🏝️</span>
-        </div>
+        <span>({{ hoveredCell.x }}, {{ hoveredCell.y }})</span>
+        <span v-if="hoveredCell.cell"> - {{ hoveredCell.cell.type }}</span>
+        <span v-if="hoveredCell.cell?.island"> - {{ hoveredCell.cell.island.name }}</span>
+        <span v-if="hoveredCell.cell?.zone"> [Zone {{ hoveredCell.cell.zone }}]</span>
+        <span v-if="!hoveredCell.cell"> - Inconnu</span>
       </div>
     </div>
 
     <div class="legend">
       <div class="legend-item">
-        <span class="legend-color sea zone-1"></span>
+        <span class="legend-color sea-z1"></span>
         <span>Mer Z1</span>
       </div>
       <div class="legend-item">
-        <span class="legend-color sea zone-2"></span>
+        <span class="legend-color sea-z2"></span>
         <span>Mer Z2</span>
       </div>
       <div class="legend-item">
-        <span class="legend-color sea zone-3"></span>
+        <span class="legend-color sea-z3"></span>
         <span>Mer Z3</span>
       </div>
       <div class="legend-item">
@@ -274,11 +470,11 @@ onMounted(async () => {
       </div>
       <div class="legend-item">
         <span class="legend-color island-known"></span>
-        <span>Île validée</span>
+        <span>Ile validee</span>
       </div>
       <div class="legend-item">
         <span class="legend-color island-discovered"></span>
-        <span>Île découverte</span>
+        <span>Ile decouverte</span>
       </div>
       <div class="legend-item">
         <span class="legend-color rocks"></span>
@@ -289,17 +485,17 @@ onMounted(async () => {
         <span>Inconnu</span>
       </div>
       <div class="legend-item">
-        <span class="ship-icon">🚢</span>
+        <span class="legend-emoji">🚢</span>
         <span>Bateau</span>
       </div>
       <div class="legend-item">
-        <span class="ship-icon">🏝️</span>
+        <span class="legend-emoji">🏝️</span>
         <span>Ile</span>
       </div>
     </div>
 
     <div class="map-instructions">
-      <p>Molette: zoom | Glisser: deplacer | Donnees persistees en MongoDB</p>
+      <p>Molette: zoom | Glisser: deplacer | Touch: support mobile</p>
     </div>
   </div>
 </template>
@@ -383,33 +579,20 @@ h2 {
   border-radius: 15px;
 }
 
-.stat.ship-pos {
-  color: #e94560;
-}
+.stat.ship-pos { color: #e94560; }
+.stat.syncing { color: #f59e0b; animation: blink 1s infinite; }
+.stat.synced { color: #22c55e; }
 
-.stat.syncing {
-  color: #f59e0b;
-  animation: blink 1s infinite;
-}
+@keyframes blink { 50% { opacity: 0.5; } }
 
-.stat.synced {
-  color: #22c55e;
-}
-
-@keyframes blink {
-  50% { opacity: 0.5; }
-}
-
-.stat-icon {
-  font-size: 0.85rem;
-}
+.stat-icon { font-size: 0.85rem; }
 
 .loading-overlay {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 400px;
+  min-height: 500px;
   gap: 15px;
   color: #94a3b8;
 }
@@ -423,138 +606,41 @@ h2 {
   animation: spin 1s linear infinite;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .map-container {
-  background: rgba(0, 0, 0, 0.3);
+  background: #0a0a14;
   border-radius: 10px;
   overflow: hidden;
   cursor: grab;
-  padding: 10px;
-  min-height: 400px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  min-height: 500px;
+  height: 500px;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .map-container:active {
   cursor: grabbing;
 }
 
-.map-grid {
-  display: grid;
-  gap: 1px;
-  background: rgba(15, 52, 96, 0.2);
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.cell {
-  border-radius: 2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.1s;
-  font-size: 10px;
-}
-
-.cell:hover {
-  transform: scale(1.15);
-  z-index: 10;
-}
-
-.cell.unknown {
-  background: rgba(50, 50, 60, 0.3);
-}
-
-.cell.sea {
-  background: #1e40af;
-}
-
-/* Zones SEA : plus la zone est haute, plus c'est foncé */
-.cell.sea.zone-1 {
-  background: #7dd3fc; /* bleu très clair */
-}
-
-.cell.sea.zone-2 {
-  background: #2563eb; /* bleu moyen */
-}
-
-.cell.sea.zone-3 {
-  background: #1d4ed8; /* bleu soutenu */
-}
-
-.cell.sea.zone-4 {
-  background: #1e3a8a; /* bleu foncé */
-}
-
-.cell.sea.zone-5 {
-  background: #172554; /* bleu très foncé */
-}
-
-.cell.sand {
-  background: #d97706;
-}
-
-.cell.rocks {
-  background: #57534e;
-}
-
-/* Île confirmée (KNOWN) → vert vif */
-.cell.has-island.island-known {
-  background: #22c55e !important;
-  border: 2px solid #86efac;
-  box-shadow: 0 0 5px rgba(34, 197, 94, 0.6);
-}
-
-/* Île en attente de confirmation (DISCOVERED) → jaune vif */
-.cell.has-island.island-discovered {
-  background: #eab308 !important;
-  border: 2px solid #fde047;
-  box-shadow: 0 0 5px rgba(234, 179, 8, 0.6);
-}
-
-.cell.state-seen {
-  opacity: 0.7;
-}
-
-.cell.state-visited {
-  opacity: 0.5;
-}
-
-.cell.ship {
-  box-shadow: 0 0 10px #e94560, 0 0 20px rgba(233, 69, 96, 0.5);
-  border: 2px solid #e94560;
-  z-index: 20;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    box-shadow: 0 0 10px #e94560, 0 0 20px rgba(233, 69, 96, 0.5);
-  }
-  50% {
-    box-shadow: 0 0 15px #e94560, 0 0 30px rgba(233, 69, 96, 0.7);
-  }
-}
-
-.ship-marker {
-  font-size: 12px;
-  animation: bob 1s ease-in-out infinite;
-}
-
-@keyframes bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
-}
-
-.other-ship {
-  font-size: 10px;
-  opacity: 0.8;
-}
-
-.island-marker {
-  font-size: 8px;
+.tooltip {
+  position: absolute;
+  background: rgba(10, 10, 20, 0.9);
+  border: 1px solid #0f3460;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 100;
 }
 
 .legend {
@@ -579,55 +665,16 @@ h2 {
   border-radius: 3px;
 }
 
-.legend-color.sea {
-  background: #1e40af;
-}
+.legend-color.sea-z1 { background: #7dd3fc; }
+.legend-color.sea-z2 { background: #2563eb; }
+.legend-color.sea-z3 { background: #1d4ed8; }
+.legend-color.sand { background: #d97706; }
+.legend-color.island-known { background: #22c55e; border: 2px solid #86efac; }
+.legend-color.island-discovered { background: #eab308; border: 2px solid #fde047; }
+.legend-color.rocks { background: #57534e; }
+.legend-color.unknown { background: rgba(50, 50, 60, 0.5); }
 
-.legend-color.sea.zone-1 {
-  background: #7dd3fc;
-}
-
-.legend-color.sea.zone-2 {
-  background: #2563eb;
-}
-
-.legend-color.sea.zone-3 {
-  background: #1d4ed8;
-}
-
-.legend-color.sea.zone-4 {
-  background: #1e3a8a;
-}
-
-.legend-color.sea.zone-5 {
-  background: #172554;
-}
-
-.legend-color.sand {
-  background: #d97706;
-}
-
-.legend-color.island-known {
-  background: #22c55e;
-  border: 2px solid #86efac;
-}
-
-.legend-color.island-discovered {
-  background: #eab308;
-  border: 2px solid #fde047;
-}
-
-.legend-color.rocks {
-  background: #57534e;
-}
-
-.legend-color.unknown {
-  background: rgba(50, 50, 60, 0.5);
-}
-
-.ship-icon {
-  font-size: 12px;
-}
+.legend-emoji { font-size: 12px; }
 
 .map-instructions {
   text-align: center;
