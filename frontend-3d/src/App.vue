@@ -8,14 +8,63 @@ const shipPos = ref({ x: 0, y: 0 });
 const cellCount = ref(0);
 const islandCount = ref(0);
 const wsConnected = ref(false);
+const devMode = ref(false);
 
 let gameScene = null;
 let disconnectWs = null;
 
+// Demo data for dev mode (no backend)
+function loadDevFallback() {
+  devMode.value = true;
+  console.log('[3D] Dev mode: using fallback data');
+
+  const demoCells = [];
+  // Create a few islands
+  const islands = [
+    { id: 'island-1', name: 'Ile du Soleil', x: 0, y: 0, radius: 2 },
+    { id: 'island-2', name: 'Ile des Palmiers', x: 15, y: -12, radius: 1 },
+    { id: 'island-3', name: 'Ile Mystere', x: -12, y: 15, radius: 3 },
+  ];
+
+  islands.forEach(isl => {
+    for (let dx = -isl.radius; dx <= isl.radius; dx++) {
+      for (let dy = -isl.radius; dy <= isl.radius; dy++) {
+        if (dx * dx + dy * dy <= isl.radius * isl.radius) {
+          demoCells.push({
+            x: isl.x + dx,
+            y: isl.y + dy,
+            type: 'SAND',
+            zone: 1,
+            island: { id: isl.id, name: isl.name }
+          });
+        }
+      }
+    }
+  });
+
+  // Sea around
+  for (let x = -15; x <= 15; x++) {
+    for (let y = -15; y <= 15; y++) {
+      const key = `${x},${y}`;
+      if (!demoCells.find(c => c.x === x && c.y === y)) {
+        demoCells.push({ x, y, type: 'SEA', zone: 1 });
+      }
+    }
+  }
+
+  gameScene.updateCells(demoCells);
+  cellCount.value = demoCells.length;
+  islandCount.value = islands.length;
+
+  // Place ship
+  shipPos.value = { x: 5, y: 0 };
+  gameScene.updateShipPosition({ x: 5, y: 0 });
+}
+
 onMounted(async () => {
   gameScene = new GameScene(canvasContainer.value);
 
-  // Load initial data
+  // Try loading from backend
   try {
     const [cells, islands, shipPosition] = await Promise.all([
       fetchCells(),
@@ -23,44 +72,40 @@ onMounted(async () => {
       fetchShipPosition().catch(() => null)
     ]);
 
+    if (!cells || cells.length === 0) {
+      throw new Error('No data from backend');
+    }
+
     cellCount.value = cells.length;
     islandCount.value = islands.length;
-
     gameScene.updateCells(cells);
 
     if (shipPosition) {
       shipPos.value = { x: shipPosition.x, y: shipPosition.y };
       gameScene.updateShipPosition(shipPosition);
     }
+
+    // WebSocket for real-time updates
+    disconnectWs = connectWebSocket(({ event, data }) => {
+      if (event === 'ws:connected') { wsConnected.value = true; return; }
+      if (event === 'ws:disconnected') { wsConnected.value = false; return; }
+
+      if (event === 'cells:update' && data?.cells) {
+        gameScene.updateCells(data.cells);
+        cellCount.value = gameScene.cells.size;
+      }
+      if (event === 'island:update' && data?.island) {
+        gameScene.updateIsland(data.island);
+      }
+      if (event === 'ship:position' && data?.position) {
+        shipPos.value = { x: data.position.x, y: data.position.y };
+        gameScene.updateShipPosition(data.position);
+      }
+    });
   } catch (err) {
-    console.error('Failed to load initial data:', err);
+    console.warn('Backend unavailable, loading dev fallback:', err.message);
+    loadDevFallback();
   }
-
-  // WebSocket for real-time updates
-  disconnectWs = connectWebSocket(({ event, data }) => {
-    if (event === 'ws:connected') {
-      wsConnected.value = true;
-      return;
-    }
-    if (event === 'ws:disconnected') {
-      wsConnected.value = false;
-      return;
-    }
-
-    if (event === 'cells:update' && data?.cells) {
-      gameScene.updateCells(data.cells);
-      cellCount.value = gameScene.cells.size;
-    }
-
-    if (event === 'island:update' && data?.island) {
-      gameScene.updateIsland(data.island);
-    }
-
-    if (event === 'ship:position' && data?.position) {
-      shipPos.value = { x: data.position.x, y: data.position.y };
-      gameScene.updateShipPosition(data.position);
-    }
-  });
 });
 
 onUnmounted(() => {
@@ -74,6 +119,9 @@ onUnmounted(() => {
 
   <div class="hud">
     <h3>KUZ 3026 - Vue 3D</h3>
+    <div v-if="devMode" class="row">
+      <span class="label" style="color: #f59e0b;">Mode Demo</span>
+    </div>
     <div class="row">
       <span class="label">Position</span>
       <span class="value">({{ shipPos.x }}, {{ shipPos.y }})</span>
@@ -90,7 +138,7 @@ onUnmounted(() => {
       <span class="label">WebSocket</span>
       <span class="value">
         <span :class="['ws-status', wsConnected ? 'connected' : 'disconnected']"></span>
-        {{ wsConnected ? 'Connecte' : 'Deconnecte' }}
+        {{ wsConnected ? 'Connecte' : devMode ? 'Demo' : 'Deconnecte' }}
       </span>
     </div>
   </div>
