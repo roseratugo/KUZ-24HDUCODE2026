@@ -8,6 +8,7 @@ import IslandsDisplay from '../components/IslandsDisplay.vue';
 import ShipControl from '../components/ShipControl.vue';
 import WorldMap from '../components/WorldMap.vue';
 import RequestHistory from '../components/RequestHistory.vue';
+import TheftsPanel from '../components/TheftsPanel.vue';
 
 const playerStore = usePlayerStore();
 const shipStore = useShipStore();
@@ -95,6 +96,12 @@ onUnmounted(() => {
           Carte & Navigation
         </button>
         <button
+          :class="['tab', { active: activeTab === 'thefts' }]"
+          @click="activeTab = 'thefts'"
+        >
+          Vols
+        </button>
+        <button
           :class="['tab', { active: activeTab === 'history' }]"
           @click="activeTab = 'history'"
         >
@@ -111,6 +118,9 @@ onUnmounted(() => {
         <div class="col-center">
           <div v-show="activeTab === 'map'" class="tab-content">
             <WorldMap />
+          </div>
+          <div v-show="activeTab === 'thefts'" class="tab-content">
+            <TheftsPanel />
           </div>
           <div v-show="activeTab === 'history'" class="tab-content">
             <RequestHistory />
