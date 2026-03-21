@@ -18,13 +18,13 @@ const moveSchema = new mongoose.Schema({
   fromPosition: {
     x: Number,
     y: Number,
-    type: String,
+    type: { type: String },
     zone: Number
   },
   toPosition: {
     x: Number,
     y: Number,
-    type: String,
+    type: { type: String },
     zone: Number
   },
   energyBefore: Number,
