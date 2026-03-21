@@ -179,15 +179,16 @@ export const useMapStore = defineStore('map', {
 
     async syncIslandStates(discoveredIslands) {
       for (const { island, islandState } of discoveredIslands) {
-        const islandId = island.id;
-        const localIsland = this.islands.get(islandId);
-        if (localIsland && localIsland.state !== islandState) {
-          localIsland.state = islandState;
+        if (islandState !== 'KNOWN') continue;
+
+        const localIsland = Array.from(this.islands.values()).find(i => i.name === island.name);
+        if (localIsland && localIsland.state !== 'KNOWN') {
+          localIsland.state = 'KNOWN';
           try {
-            await islandsApi.updateState(islandId, islandState);
-            console.log(`Island ${island.name} (${islandId}) state updated to ${islandState}`);
+            await islandsApi.updateState(localIsland.islandId, 'KNOWN');
+            console.log(`Island ${island.name} state updated to KNOWN`);
           } catch (err) {
-            console.error(`Failed to update island ${islandId} state:`, err);
+            console.error(`Failed to update island ${island.name} state:`, err);
           }
         }
       }
