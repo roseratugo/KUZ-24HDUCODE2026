@@ -72,6 +72,11 @@ export const shipApi = {
   move: (direction) => apiClient.post('/ship/move', { direction })
 };
 
+export const theftsApi = {
+  getAll: () => apiClient.get('/thefts'),
+  steal: (resourceType, moneySpent) => apiClient.post('/thefts/player', { resourceType, moneySpent })
+};
+
 export const registrationApi = {
   signupCodes: (email) => apiClient.post('/signupcodes', { mail: email }),
   register: (name, signupCode) => apiClient.post('/players/register', { name }, {

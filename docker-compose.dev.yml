@@ -1,0 +1,59 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: kuz-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: kuz3026
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - kuz-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kuz-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - MONGODB_URI=mongodb://mongodb:27017/kuz3026
+    ports:
+      - "3001:3001"
+    networks:
+      - kuz-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_BACKEND_URL=
+        - VITE_GAME_ID=kuz-team
+    container_name: kuz-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    networks:
+      - kuz-network
+    depends_on:
+      - backend
+
+networks:
+  kuz-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
