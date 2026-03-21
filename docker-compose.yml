@@ -16,9 +16,7 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/roseratugo/kuz-backend:latest
     container_name: kuz-backend
     restart: unless-stopped
     environment:
@@ -32,12 +30,7 @@ services:
         condition: service_healthy
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        - VITE_BACKEND_URL=
-        - VITE_GAME_ID=kuz-team
+    image: ghcr.io/roseratugo/kuz-frontend:latest
     container_name: kuz-frontend
     restart: unless-stopped
     networks:
