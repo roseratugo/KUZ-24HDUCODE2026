@@ -133,21 +133,55 @@ export class GameScene {
 
   updateShipPosition(pos) {
     if (!pos) return;
+    const moved = pos.x !== this.shipPosition.x || pos.y !== this.shipPosition.y;
     this.shipPosition = pos;
     const scenePos = this.worldToScene(pos.x, pos.y);
     this.targetBoatPos.set(scenePos.x, 9, scenePos.z);
+
+    // Refresh nearby islands when ship moves
+    if (moved) {
+      this.refreshNearbyIslands();
+    }
+  }
+
+  refreshNearbyIslands() {
+    const RENDER_RADIUS = 100;
+    const sx = this.shipPosition.x;
+    const sy = this.shipPosition.y;
+
+    this.islandManager.setShipPosition(sx, sy, RENDER_RADIUS);
+    for (const [, cell] of this.cells) {
+      if (cell.type !== 'SAND' && !cell.island) continue;
+      const dx = cell.x - sx;
+      const dy = cell.y - sy;
+      if (dx * dx + dy * dy <= RENDER_RADIUS * RENDER_RADIUS) {
+        this.islandManager.addCell(cell);
+      }
+    }
   }
 
   updateCells(cells) {
+    const RENDER_RADIUS = 100;
+    const sx = this.shipPosition.x;
+    const sy = this.shipPosition.y;
+
     cells.forEach(cell => {
       const key = `${cell.x},${cell.y}`;
       if (!this.cells.has(key)) {
         this.cells.set(key, cell);
-        if (cell.type === 'SAND' || cell.island) {
-          this.islandManager.addCell(cell);
-        }
       }
     });
+
+    // Only send nearby SAND cells to island manager
+    this.islandManager.setShipPosition(sx, sy, RENDER_RADIUS);
+    for (const [, cell] of this.cells) {
+      if (cell.type !== 'SAND' && !cell.island) continue;
+      const dx = cell.x - sx;
+      const dy = cell.y - sy;
+      if (dx * dx + dy * dy <= RENDER_RADIUS * RENDER_RADIUS) {
+        this.islandManager.addCell(cell);
+      }
+    }
   }
 
   updateIsland(island) {
