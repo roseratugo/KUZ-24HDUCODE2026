@@ -19,11 +19,6 @@ export default defineConfig({
       '/ws': {
         target: 'ws://localhost:3001',
         ws: true
-      },
-      '/bot-api': {
-        target: 'http://localhost:5001',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/bot-api/, '')
       }
     }
   }

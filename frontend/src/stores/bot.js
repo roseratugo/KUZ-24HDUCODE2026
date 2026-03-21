@@ -1,74 +1,150 @@
 import { defineStore } from 'pinia';
-import { ref, computed, markRaw } from 'vue';
-import { ExplorationBot } from '../bots/ExplorationBot';
+import { ref, computed } from 'vue';
+import mapClient from '../api/mapApi';
 
 export const useBotStore = defineStore('bot', () => {
-  const botInstances = ref({});
-  const botLogs = ref({});
+  const status = ref({
+    running: false,
+    paused: false,
+    state: 'IDLE',
+    position: null,
+    energy: 0,
+    maxEnergy: 15,
+    moveCount: 0,
+    cellsDiscovered: 0,
+    islandsFound: 0,
+    knownRechargePoints: 0,
+    visitedPositions: 0,
+    speed: 5000,
+    uptime: 0
+  });
+  const logs = ref([]);
+  const loading = ref(false);
+  const error = ref(null);
+  const lastLogId = ref(0);
+  let pollTimer = null;
 
-  const bots = ref([
-    {
-      id: 'exploration-bot',
-      name: 'Cartographe',
-      icon: '🗺️',
-      description: 'Bot d\'exploration automatique',
-      isActive: false,
-      isAvailable: true,
-      status: 'stopped'
+  const isRunning = computed(() => status.value.running);
+  const isPaused = computed(() => status.value.paused);
+  const botState = computed(() => status.value.state);
+
+  async function start() {
+    loading.value = true;
+    error.value = null;
+    try {
+      const res = await mapClient.post('/bot/start');
+      if (res.data.success) {
+        startPolling();
+      } else {
+        error.value = res.data.message;
+      }
+      return res.data;
+    } catch (err) {
+      error.value = err.response?.data?.message || err.message;
+      throw err;
+    } finally {
+      loading.value = false;
     }
-  ]);
+  }
 
-  const activeBotsCount = computed(() => bots.value.filter(b => b.isActive).length);
-  const totalActions = computed(() => 0);
+  async function stop() {
+    loading.value = true;
+    error.value = null;
+    try {
+      const res = await mapClient.post('/bot/stop');
+      stopPolling();
+      await fetchStatus();
+      return res.data;
+    } catch (err) {
+      error.value = err.response?.data?.message || err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
 
-  const getBotsByCategory = () => bots.value;
-  const getBotById = (id) => bots.value.find(b => b.id === id);
-  const getBotLogs = (id) => botLogs.value[id] || [];
-  const clearBotLogs = (id) => { botLogs.value[id] = []; };
-  const getBotStats = (id) => botInstances.value[id]?.getStats() || null;
-  const updateBotConfig = () => {};
+  async function pause() {
+    try {
+      const res = await mapClient.post('/bot/pause');
+      await fetchStatus();
+      return res.data;
+    } catch (err) {
+      error.value = err.response?.data?.message || err.message;
+    }
+  }
 
-  const toggleBot = async (botId) => {
-    const bot = bots.value.find(b => b.id === botId);
-    if (!bot) return;
+  async function resume() {
+    try {
+      const res = await mapClient.post('/bot/resume');
+      await fetchStatus();
+      return res.data;
+    } catch (err) {
+      error.value = err.response?.data?.message || err.message;
+    }
+  }
 
-    if (bot.isActive) {
-      const instance = botInstances.value[bot.id];
-      if (instance) await instance.stop();
-      delete botInstances.value[bot.id];
-      bot.isActive = false;
-      bot.status = 'stopped';
-    } else {
-      const instance = new ExplorationBot();
-      if (!botLogs.value[bot.id]) botLogs.value[bot.id] = [];
+  async function fetchStatus() {
+    try {
+      const res = await mapClient.get('/bot/status');
+      status.value = res.data;
+    } catch (err) {
+      console.error('Failed to fetch bot status:', err);
+    }
+  }
 
-      instance.onLog = (entry) => {
-        botLogs.value[bot.id] = [...botLogs.value[bot.id], entry];
-        if (botLogs.value[bot.id].length > 200) {
-          botLogs.value[bot.id] = botLogs.value[bot.id].slice(-200);
+  async function fetchLogs() {
+    try {
+      const res = await mapClient.get(`/bot/logs?since=${lastLogId.value}`);
+      if (res.data.length > 0) {
+        logs.value.push(...res.data);
+        lastLogId.value = res.data[res.data.length - 1].id + 1;
+        // Keep last 200 logs in frontend
+        if (logs.value.length > 200) {
+          logs.value = logs.value.slice(-200);
         }
-      };
-
-      instance.onStatusChange = (status) => {
-        bot.status = status;
-        if (status === 'stopped') bot.isActive = false;
-      };
-
-      botInstances.value[bot.id] = markRaw(instance);
-      bot.isActive = true;
-      bot.status = 'running';
-
-      await instance.start();
+      }
+    } catch (err) {
+      console.error('Failed to fetch bot logs:', err);
     }
-  };
+  }
 
-  const pauseBot = () => {};
-  const resumeBot = () => {};
-  const stopAllBots = () => bots.value.forEach(b => { if (b.isActive) toggleBot(b.id); });
+  async function clearLogs() {
+    try {
+      await mapClient.delete('/bot/logs');
+      logs.value = [];
+      lastLogId.value = 0;
+    } catch (err) {
+      console.error('Failed to clear bot logs:', err);
+    }
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(async () => {
+      await Promise.all([fetchStatus(), fetchLogs()]);
+    }, 2000);
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  // Initialize: fetch status and start polling if bot is running
+  async function init() {
+    await fetchStatus();
+    if (status.value.running) {
+      startPolling();
+    }
+  }
 
   return {
-    bots, botLogs, activeBotsCount, totalActions,
-    getBotsByCategory, toggleBot, pauseBot, resumeBot, stopAllBots,
-    getBotById, getBotLogs, clearBotLogs, getBotStats, updateBotConfig
+    status, logs, loading, error,
+    isRunning, isPaused, botState,
+    start, stop, pause, resume,
+    fetchStatus, fetchLogs, clearLogs,
+    startPolling, stopPolling, init
   };
 });
