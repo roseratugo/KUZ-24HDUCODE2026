@@ -23,10 +23,17 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// URLs to exclude from history (auto-refresh endpoints)
+const excludeFromHistory = ['/players/details', '/resources'];
+
+const shouldLogToHistory = (url) => {
+  return !excludeFromHistory.some(excluded => url?.includes(excluded));
+};
+
 apiClient.interceptors.response.use(
   (response) => {
     const duration = Date.now() - response.config.metadata.startTime;
-    if (historyStore) {
+    if (historyStore && shouldLogToHistory(response.config.url)) {
       historyStore.addRequest({
         method: response.config.method,
         url: response.config.url,
@@ -41,7 +48,7 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     const duration = error.config?.metadata ? Date.now() - error.config.metadata.startTime : null;
-    if (historyStore) {
+    if (historyStore && shouldLogToHistory(error.config?.url)) {
       historyStore.addRequest({
         method: error.config?.method,
         url: error.config?.url,

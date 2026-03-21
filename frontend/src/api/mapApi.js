@@ -57,6 +57,21 @@ export const islandsApi = {
   clearAll: () => mapClient.delete(`/islands?gameId=${GAME_ID}`)
 };
 
+export const movesApi = {
+  getAll: () => mapClient.get(`/moves/${GAME_ID}`),
+
+  getRecent: (limit = 50) => mapClient.get(`/moves/${GAME_ID}/recent/${limit}`),
+
+  getStats: () => mapClient.get(`/moves/${GAME_ID}/stats`),
+
+  save: (moveData) => mapClient.post('/moves', {
+    gameId: GAME_ID,
+    ...moveData
+  }),
+
+  clearAll: () => mapClient.delete(`/moves/${GAME_ID}`)
+};
+
 export const statsApi = {
   get: () => mapClient.get('/stats'),
   health: () => mapClient.get('/health')
