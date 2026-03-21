@@ -12,6 +12,7 @@ import TheftsPanel from '../components/TheftsPanel.vue';
 import ShipUpgradePanel from '../components/ShipUpgradePanel.vue';
 import StorageUpgradePanel from '../components/StorageUpgradePanel.vue';
 import Marketplace from '../components/Marketplace.vue';
+import BotsPanel from '../components/BotsPanel.vue';
 
 const playerStore = usePlayerStore();
 const shipStore = useShipStore();
@@ -129,15 +130,21 @@ onUnmounted(() => {
         >
           Marketplace
         </button>
+        <button
+          :class="['tab', { active: activeTab === 'bots' }]"
+          @click="activeTab = 'bots'"
+        >
+          🤖 Bots
+        </button>
       </div>
 
-      <div :class="['grid-layout', { 'marketplace-mode': activeTab === 'marketplace' }]">
-        <div v-show="activeTab !== 'marketplace'" class="col-left">
+      <div :class="['grid-layout', { 'marketplace-mode': activeTab === 'marketplace' || activeTab === 'bots' }]">
+        <div v-show="activeTab !== 'marketplace' && activeTab !== 'bots'" class="col-left">
           <PlayerInfo />
           <ResourcesDisplay />
           <IslandsDisplay />
         </div>
-        <div :class="['col-center', { 'col-full': activeTab === 'marketplace' }]">
+        <div :class="['col-center', { 'col-full': activeTab === 'marketplace' || activeTab === 'bots' }]">
           <div v-show="activeTab === 'map'" class="tab-content">
             <WorldMap />
           </div>
@@ -156,8 +163,11 @@ onUnmounted(() => {
           <div v-show="activeTab === 'marketplace'" class="tab-content">
             <Marketplace />
           </div>
+          <div v-show="activeTab === 'bots'" class="tab-content">
+            <BotsPanel />
+          </div>
         </div>
-        <div v-show="activeTab !== 'marketplace'" class="col-right">
+        <div v-show="activeTab !== 'marketplace' && activeTab !== 'bots'" class="col-right">
           <ShipControl />
         </div>
       </div>
