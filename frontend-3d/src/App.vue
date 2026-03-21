@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { GameScene } from './three/scene.js';
 import { fetchCells, fetchIslands, fetchShipPosition, connectWebSocket } from './three/api.js';
+import Minimap from './components/Minimap.vue';
 
 const canvasContainer = ref(null);
 const shipPos = ref({ x: 0, y: 0 });
@@ -9,6 +10,7 @@ const cellCount = ref(0);
 const islandCount = ref(0);
 const wsConnected = ref(false);
 const devMode = ref(false);
+const allCells = ref(new Map());
 
 let gameScene = null;
 let disconnectWs = null;
@@ -55,6 +57,7 @@ function loadDevFallback() {
   gameScene.updateCells(demoCells);
   cellCount.value = demoCells.length;
   islandCount.value = islands.length;
+  allCells.value = gameScene.cells;
 
   // Place ship
   shipPos.value = { x: 5, y: 0 };
@@ -79,6 +82,7 @@ onMounted(async () => {
     cellCount.value = cells.length;
     islandCount.value = islands.length;
     gameScene.updateCells(cells);
+    allCells.value = gameScene.cells;
 
     if (shipPosition) {
       shipPos.value = { x: shipPosition.x, y: shipPosition.y };
@@ -93,6 +97,7 @@ onMounted(async () => {
       if (event === 'cells:update' && data?.cells) {
         gameScene.updateCells(data.cells);
         cellCount.value = gameScene.cells.size;
+        allCells.value = gameScene.cells;
       }
       if (event === 'island:update' && data?.island) {
         gameScene.updateIsland(data.island);
@@ -142,4 +147,6 @@ onUnmounted(() => {
       </span>
     </div>
   </div>
+
+  <Minimap :cells="allCells" :shipX="shipPos.x" :shipY="shipPos.y" />
 </template>
