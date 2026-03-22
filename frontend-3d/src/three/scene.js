@@ -388,8 +388,8 @@ export class GameScene {
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
-      // Apply rotation (offset for Vogue Merry model orientation)
-      this.boat.rotation.y = this.boatHeading;
+      // Apply rotation (offset for Vogue Merry model which faces +X by default)
+      this.boat.rotation.y = this.boatHeading + Math.PI;
 
       // Roll into turns
       const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
