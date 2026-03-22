@@ -11,6 +11,8 @@ import priceHistoryRoutes from './routes/priceHistory.js';
 import offersRoutes from './routes/offers.js';
 import { brokerService } from './services/brokerService.js';
 import { offerSyncService } from './services/offerSyncService.js';
+import botRoutes from './routes/bot.js';
+import { setupWebSocket } from './ws.js';
 
 const app = express();
 const server = createServer(app);
@@ -52,6 +54,7 @@ app.use('/api/moves', moveRoutes);
 app.use('/api/ship-position', shipPositionRoutes);
 app.use('/api/prices', priceHistoryRoutes);
 app.use('/api/offers', offersRoutes);
+app.use('/api/bot', botRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -78,6 +81,8 @@ app.get('/api/stats', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+setupWebSocket(server);
 
 server.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);

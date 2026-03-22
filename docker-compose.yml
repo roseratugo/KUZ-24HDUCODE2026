@@ -29,9 +29,33 @@ services:
       mongodb:
         condition: service_healthy
 
+  mongo-express:
+    image: mongo-express:latest
+    container_name: kuz-mongo-express
+    restart: unless-stopped
+    environment:
+      - ME_CONFIG_MONGODB_URL=mongodb://mongodb:27017/kuz3026
+      - ME_CONFIG_BASICAUTH=false
+    networks:
+      - kuz-network
+      - proxy_net
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
   frontend:
     image: ghcr.io/roseratugo/kuz-frontend:latest
     container_name: kuz-frontend
+    restart: unless-stopped
+    networks:
+      - kuz-network
+      - proxy_net
+    depends_on:
+      - backend
+
+  frontend-3d:
+    image: ghcr.io/roseratugo/kuz-frontend-3d:latest
+    container_name: kuz-frontend-3d
     restart: unless-stopped
     networks:
       - kuz-network

@@ -150,7 +150,7 @@ const resetShipData = () => {
             :style="{ width: cooldownPercent + '%' }"
           ></div>
         </div>
-        <span class="cooldown-text">{{ cooldownSeconds }}s</span>
+        <span class="cooldown-text">{{ cooldownRemaining }}ms</span>
       </div>
       <div class="direction-grid" :class="{ 'on-cooldown': isOnCooldown }">
         <button
