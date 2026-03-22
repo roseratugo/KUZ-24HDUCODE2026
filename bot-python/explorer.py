@@ -295,11 +295,57 @@ class SmartExplorer:
     # INITIALISATION
     # ========================
 
+    def _pay_due_taxes(self) -> bool:
+        """Vérifie et paie les taxes en attente. Retourne True si des taxes ont été payées."""
+        try:
+            taxes = self.api.get_taxes()
+            due_taxes = [t for t in taxes if t.get("state") == "DUE"]
+
+            if not due_taxes:
+                return False
+
+            self.log(f"Taxes en attente détectées: {len(due_taxes)}", "warn")
+
+            for tax in due_taxes:
+                tax_id = tax.get("id")
+                tax_type = tax.get("type", "UNKNOWN")
+                amount = tax.get("amount", 0)
+                message = tax.get("message", "")
+
+                self.log(f"Paiement taxe {tax_type}: {message} - {amount} pièces", "warn")
+
+                try:
+                    self.api.pay_tax(tax_id)
+                    self.log(f"Taxe {tax_type} payée!", "success")
+                except Exception as e:
+                    self.log(f"Échec paiement taxe: {e}", "error")
+                    return False
+
+            time.sleep(1)  # Délai pour laisser le serveur traiter
+            return True
+
+        except Exception as e:
+            self.log(f"Erreur vérification taxes: {e}", "warn")
+            return False
+
+    def _is_ship_in_distress_error(self, error: Exception) -> bool:
+        """Vérifie si l'erreur est de type SHIP_IN_DISTRESS"""
+        error_msg = str(error).upper()
+        distress_keywords = [
+            "SHIP_IN_DISTRESS", "IMMOBILI", "MAELSTROM", "KRAKEN",
+            "PIRATE", "PANNE", "RESCUE", "MORT", "DEAD", "SUNK"
+        ]
+        return any(keyword in error_msg for keyword in distress_keywords)
+
     def initialize(self) -> bool:
         """Initialise le bot avec les données existantes"""
         self.log("Initialisation du bot...")
 
         try:
+            # 0. Vérifier s'il y a des taxes en attente AVANT tout
+            if self._pay_due_taxes():
+                self.log("Taxes payées au démarrage", "success")
+
             # 1. Récupérer les détails du joueur
             details = self.api.get_player_details()
 
@@ -342,11 +388,34 @@ class SmartExplorer:
             else:
                 # Faire un mouvement initial pour découvrir la position
                 self.log("Position inconnue, mouvement initial...")
-                if self.energy <= 0:
-                    self.log("Pas d'énergie pour le mouvement initial!", "error")
-                    return False
 
-                result = self.api.move_ship("N")
+                # Si pas d'énergie, vérifier les taxes
+                if self.energy <= 0:
+                    self.log("Pas d'énergie, vérification des taxes...", "warn")
+                    if self._pay_due_taxes():
+                        # Récupérer les nouvelles stats après paiement
+                        details = self.api.get_player_details()
+                        self.energy = details["ship"].get("availableMove", 0)
+                        self.log(f"Énergie après paiement: {self.energy}")
+
+                    if self.energy <= 0:
+                        self.log("Toujours pas d'énergie après paiement!", "error")
+                        return False
+
+                # Essayer le mouvement initial
+                try:
+                    result = self.api.move_ship("N")
+                except Exception as e:
+                    if self._is_ship_in_distress_error(e):
+                        self.log(f"Bateau en détresse: {e}", "warn")
+                        if self._pay_due_taxes():
+                            # Réessayer après paiement
+                            result = self.api.move_ship("N")
+                        else:
+                            raise
+                    else:
+                        raise
+
                 self.position = result["position"]
                 self.energy = result["energy"]
                 self.move_count += 1
@@ -366,6 +435,13 @@ class SmartExplorer:
             return True
 
         except Exception as e:
+            # Dernière tentative: peut-être une erreur SHIP_IN_DISTRESS non gérée
+            if self._is_ship_in_distress_error(e):
+                self.log(f"Détresse détectée: {e}, tentative de récupération...", "warn")
+                if self._pay_due_taxes():
+                    # Réessayer l'initialisation complète
+                    return self.initialize()
+
             self.log(f"Erreur d'initialisation: {e}", "error")
             return False
 
@@ -445,6 +521,12 @@ class SmartExplorer:
             return result
 
         except Exception as e:
+            # Vérifier si c'est une erreur SHIP_IN_DISTRESS
+            if self._is_ship_in_distress_error(e):
+                self.log(f"Bateau en détresse: {e}", "warn")
+                self.state = "RESCUE"
+                return None
+
             self.log(f"Erreur mouvement: {e}", "error")
             raise
 
@@ -666,8 +748,8 @@ class SmartExplorer:
         except Exception as e:
             error_msg = str(e).lower()
 
-            # Détection des erreurs de mort (kraken, pirate, panne, etc.)
-            if any(word in error_msg for word in ["immobili", "panne", "rescue", "kraken", "pirate", "mort", "dead", "sunk"]):
+            # Détection des erreurs de détresse
+            if self._is_ship_in_distress_error(e):
                 self.log(f"Bateau en détresse! Raison: {e}", "warn")
                 self.state = "RESCUE"
             elif "too_fast" in error_msg or "trop rapide" in error_msg:
