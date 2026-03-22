@@ -395,8 +395,8 @@ export class GameScene {
       // Use YXZ Euler order: heading (Y) first, then pitch/backflip (X), then roll (Z)
       this.boat.rotation.order = 'YXZ';
 
-      // Heading
-      this.boat.rotation.y = this.boatHeading + Math.PI;
+      // Heading (model bow faces -X, so offset = +PI/2)
+      this.boat.rotation.y = this.boatHeading + Math.PI / 2;
 
       // Roll into turns
       const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.3, -0.1, 0.1);
