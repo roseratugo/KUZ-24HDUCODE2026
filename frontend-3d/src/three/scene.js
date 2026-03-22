@@ -392,8 +392,8 @@ export class GameScene {
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
-      // Apply rotation (model bow aligned on +Z via boat.js rotation)
-      this.boat.rotation.y = this.boatHeading;
+      // Apply rotation (+ PI to flip forward direction)
+      this.boat.rotation.y = this.boatHeading + Math.PI;
 
       // Roll into turns
       const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
