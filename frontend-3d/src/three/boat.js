@@ -20,8 +20,6 @@ export function loadBoat() {
         const center = box.getCenter(new THREE.Vector3());
         model.position.sub(center.multiplyScalar(scale));
 
-        // Rotate model 180° so it faces forward
-        model.rotation.y = Math.PI;
 
         // Wrap in a group for easy positioning
         const group = new THREE.Group();
