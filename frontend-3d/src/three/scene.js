@@ -190,13 +190,12 @@ export class GameScene {
     }
     this.lastUpdateTime = now;
 
-    // Compute velocity from position delta
+    // Compute velocity and heading from position delta
     if (moved) {
-      this.boatVelocity.set(
-        (scenePos.x - this.prevTargetPos.x) / this.updateInterval,
-        0,
-        (scenePos.z - this.prevTargetPos.z) / this.updateInterval
-      );
+      const dx = scenePos.x - this.prevTargetPos.x;
+      const dz = scenePos.z - this.prevTargetPos.z;
+      this.boatVelocity.set(dx / this.updateInterval, 0, dz / this.updateInterval);
+      this.targetHeading = Math.atan2(dx, dz);
     } else {
       this.boatVelocity.set(0, 0, 0);
     }
@@ -381,12 +380,7 @@ export class GameScene {
       this.boat.position.x += (this.smoothedTarget.x - this.boat.position.x) * lerpSpeed;
       this.boat.position.z += (this.smoothedTarget.z - this.boat.position.z) * lerpSpeed;
 
-      // Heading: face direction of movement
-      if (distToTarget > 0.5) {
-        this.targetHeading = Math.atan2(toTarget.x, toTarget.z);
-      }
-
-      // Smooth turn
+      // Smooth turn (targetHeading updated only on server position change)
       let headingDiff = this.targetHeading - this.boatHeading;
       while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
