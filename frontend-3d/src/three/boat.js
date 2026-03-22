@@ -5,7 +5,7 @@ export function loadBoat() {
   return new Promise((resolve, reject) => {
     const loader = new GLTFLoader();
     loader.load(
-      '/models/scene.gltf',
+      '/models/vogmerry/scene.gltf',
       (gltf) => {
         const model = gltf.scene;
 

@@ -1,0 +1,11 @@
+Model Information:
+* title:	One Piece -Going Merry
+* source:	https://sketchfab.com/3d-models/one-piece-going-merry-0e1f16189e8b4b4d9d9c3c60893d692b
+* author:	Anex (https://sketchfab.com/anex)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "One Piece -Going Merry" (https://sketchfab.com/3d-models/one-piece-going-merry-0e1f16189e8b4b4d9d9c3c60893d692b) by Anex (https://sketchfab.com/anex) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
