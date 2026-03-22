@@ -14,7 +14,12 @@
       "Bash(curl:*)",
       "Bash(python -m json.tool)",
       "Read(//tmp/**)",
-      "Bash(xargs wc:*)"
+      "Bash(xargs wc:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(node -e \":*)",
+      "Bash(timeout 15 node -e \":*)",
+      "Bash(docker compose:*)",
+      "Bash(ls:*)"
     ]
   }
 }
