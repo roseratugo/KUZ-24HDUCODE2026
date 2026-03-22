@@ -19,6 +19,10 @@ export default defineConfig({
       '/ws': {
         target: 'ws://localhost:3001',
         ws: true
+      },
+      '/broker': {
+        target: 'ws://localhost:3001',
+        ws: true
       }
     }
   }
