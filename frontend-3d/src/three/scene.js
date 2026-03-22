@@ -27,11 +27,13 @@ export class GameScene {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.8;
+    this.renderer.setClearColor(0xc8dce8);
     this.container.appendChild(this.renderer.domElement);
 
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x8eafc1, 200, 800);
+    // Soft fog — blends water/islands into distance
+    this.scene.fog = new THREE.FogExp2(0xc8dce8, 0.0015);
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 20000);
