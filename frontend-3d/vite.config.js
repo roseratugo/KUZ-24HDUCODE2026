@@ -6,6 +6,11 @@ export default defineConfig({
   server: {
     port: 3002,
     proxy: {
+      '/api': {
+        target: 'http://ec2-15-237-116-133.eu-west-3.compute.amazonaws.com:8443',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      },
       '/backend-api': {
         target: 'http://localhost:3001',
         changeOrigin: true,
