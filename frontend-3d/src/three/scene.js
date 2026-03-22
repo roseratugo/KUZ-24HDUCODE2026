@@ -392,15 +392,14 @@ export class GameScene {
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
-      // Apply rotation (no offset, model pre-rotated in boat.js)
-      this.boat.rotation.y = this.boatHeading;
+      // Apply rotation
+      this.boat.rotation.y = this.boatHeading + Math.PI;
 
-      // Roll into turns
+      // Roll into turns (on X axis — lateral tilt)
       const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
-      this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, targetRoll, 1 - Math.pow(0.005, delta));
+      this.boat.rotation.x = THREE.MathUtils.lerp(this.boat.rotation.x, targetRoll, 1 - Math.pow(0.005, delta));
 
       // Backflip animation (Y key)
-      // Simulates gravity: launch velocity, gravity pulls down, splash + resurface
       let jumpY = 0;
       let flipAngle = 0;
       let isFlipping = false;
@@ -411,51 +410,41 @@ export class GameScene {
           this._jumpTimer = -1;
         } else {
           isFlipping = true;
-          // Gravity-based Y: parabola that goes negative (underwater)
-          // y = v0*t - 0.5*g*t^2, calibrated so peak at t=0.4, splash at t=0.75, resurface at t=1
           const t = totalT;
           if (t < 0.75) {
-            // Launch → peak → fall into water
             const p = t / 0.75;
-            jumpY = this._jumpHeight * 4 * p * (1 - p); // parabola peaking at p=0.5 (t=0.375)
+            jumpY = this._jumpHeight * 4 * p * (1 - p);
           } else {
-            // Underwater dip → resurface
             const p = (t - 0.75) / 0.25;
-            const dip = Math.sin(p * Math.PI); // 0 → 1 → 0
-            jumpY = -this._diveDepth * dip;
+            jumpY = -this._diveDepth * Math.sin(p * Math.PI);
           }
 
-          // Backflip rotation on Z axis (because model is offset +PI/2 on Y)
-          // Smooth full 360° rotation with easing
+          // Backflip rotation on Z axis (forward/back flip)
           if (t < 0.1) {
-            // Wind up
             const p = t / 0.1;
             flipAngle = p * p * 0.2;
           } else if (t < 0.7) {
-            // Main flip — full rotation
             const p = (t - 0.1) / 0.6;
             const ease = p * p * (3 - 2 * p);
             flipAngle = 0.2 + ease * (Math.PI * 2 - 0.2);
           } else if (t < 0.85) {
-            // Settle back
             const p = (t - 0.7) / 0.15;
-            flipAngle = Math.PI * 2 * (1 + 0.03 * (1 - p)); // slight overshoot
+            flipAngle = Math.PI * 2 * (1 + 0.03 * (1 - p));
           } else {
-            // Snap to clean 0
             const p = (t - 0.85) / 0.15;
             flipAngle = Math.PI * 2 * (1 - p * p * (3 - 2 * p)) * 0.03;
           }
         }
       }
 
-      // Pitch + roll
+      // Apply pitch/backflip on Z, roll on X
       const speed = Math.min(1, distToTarget);
       if (isFlipping) {
-        this.boat.rotation.z = targetRoll + flipAngle;
+        this.boat.rotation.z = flipAngle;
         this.boat.rotation.x = 0;
       } else {
         const targetPitch = -speed * 0.03 + Math.sin(time * 1.2) * 0.015;
-        this.boat.rotation.x = THREE.MathUtils.lerp(this.boat.rotation.x, targetPitch, 1 - Math.pow(0.05, delta));
+        this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, targetPitch, 1 - Math.pow(0.05, delta));
       }
 
       // Bobbing + jump
