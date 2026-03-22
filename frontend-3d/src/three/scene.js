@@ -155,7 +155,7 @@ export class GameScene {
 
     this.islandManager.setShipPosition(sx, sy, RENDER_RADIUS);
     for (const [, cell] of this.cells) {
-      if (cell.type !== 'SAND' && !cell.island) continue;
+      if (cell.type !== 'SAND') continue;
       const dx = cell.x - sx;
       const dy = cell.y - sy;
       if (dx * dx + dy * dy <= RENDER_RADIUS * RENDER_RADIUS) {
@@ -179,7 +179,7 @@ export class GameScene {
     // Only send nearby SAND cells to island manager
     this.islandManager.setShipPosition(sx, sy, RENDER_RADIUS);
     for (const [, cell] of this.cells) {
-      if (cell.type !== 'SAND' && !cell.island) continue;
+      if (cell.type !== 'SAND') continue;
       const dx = cell.x - sx;
       const dy = cell.y - sy;
       if (dx * dx + dy * dy <= RENDER_RADIUS * RENDER_RADIUS) {
@@ -203,13 +203,7 @@ export class GameScene {
     this.water.material.uniforms['time'].value = time;
 
     if (this.boat) {
-      const ACCELERATION = 8;    // units/s²
-      const DECELERATION = 4;    // drag when no target diff
-      const MAX_SPEED = 25;      // max units/s
-      const TURN_SPEED = 2.0;    // radians/s
-      const ARRIVE_DIST = 0.5;   // stop threshold
-
-      // Direction to target
+      // Direction to target (flat, no Y)
       const toTarget = new THREE.Vector3(
         this.targetBoatPos.x - this.boat.position.x,
         0,
@@ -217,57 +211,38 @@ export class GameScene {
       );
       const distToTarget = toTarget.length();
 
-      if (distToTarget > ARRIVE_DIST) {
-        // Calculate desired heading
-        this.targetHeading = Math.atan2(toTarget.x, toTarget.z) + Math.PI / 2;
+      // Smooth movement: lerp position directly toward target
+      const lerpSpeed = 1 - Math.pow(0.02, delta); // smooth ~2s to arrive
+      this.boat.position.x += (this.targetBoatPos.x - this.boat.position.x) * lerpSpeed;
+      this.boat.position.z += (this.targetBoatPos.z - this.boat.position.z) * lerpSpeed;
 
-        // Accelerate
-        this.boatSpeed = Math.min(MAX_SPEED, this.boatSpeed + ACCELERATION * delta);
-
-        // Slow down when approaching target (braking)
-        const brakeDist = (this.boatSpeed * this.boatSpeed) / (2 * DECELERATION);
-        if (distToTarget < brakeDist) {
-          this.boatSpeed = Math.max(2, this.boatSpeed - DECELERATION * 2 * delta);
-        }
-      } else {
-        // Decelerate to stop
-        this.boatSpeed = Math.max(0, this.boatSpeed - DECELERATION * delta);
+      // Heading: face direction of movement
+      if (distToTarget > 1) {
+        this.targetHeading = Math.atan2(toTarget.x, toTarget.z);
       }
 
-      // Smooth heading turn (shortest path)
+      // Smooth turn
       let headingDiff = this.targetHeading - this.boatHeading;
-      // Normalize to [-PI, PI]
       while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
-      this.boatHeading += headingDiff * Math.min(1, TURN_SPEED * delta);
+      this.boatHeading += headingDiff * Math.min(1, 2.0 * delta);
 
-      // Move forward along heading
-      if (this.boatSpeed > 0.01) {
-        const moveAngle = this.boatHeading - Math.PI / 2; // undo the +90 offset
-        this.boat.position.x += Math.sin(moveAngle) * this.boatSpeed * delta;
-        this.boat.position.z += Math.cos(moveAngle) * this.boatSpeed * delta;
-      }
+      // Apply rotation (+90 offset for model orientation)
+      this.boat.rotation.y = this.boatHeading + Math.PI / 2;
 
-      // Apply heading rotation
-      this.boat.rotation.y = this.boatHeading;
-
-      // Roll in turns (lean into the turn)
-      const turnRate = headingDiff * TURN_SPEED;
-      const targetRoll = THREE.MathUtils.clamp(turnRate * 0.15, -0.12, 0.12);
+      // Roll into turns
+      const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.3, -0.1, 0.1);
       this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, targetRoll, 1 - Math.pow(0.01, delta));
 
-      // Pitch from speed (nose up when accelerating, down when braking)
-      const speedRatio = this.boatSpeed / MAX_SPEED;
-      const targetPitch = -speedRatio * 0.04 + Math.sin(time * 1.2) * 0.02;
+      // Pitch: slight nose-up when moving
+      const speed = distToTarget > 1 ? 1 : distToTarget;
+      const targetPitch = -speed * 0.03 + Math.sin(time * 1.2) * 0.015;
       this.boat.rotation.x = THREE.MathUtils.lerp(this.boat.rotation.x, targetPitch, 1 - Math.pow(0.05, delta));
 
-      // Bobbing (wave motion)
+      // Bobbing
       this.boat.position.y = 9 + Math.sin(time * 1.5) * 0.3 + Math.sin(time * 2.3) * 0.1;
 
-      // Wake effect: slightly lift stern at speed
-      this.boat.position.y += speedRatio * 0.4;
-
-      // Camera: smoothly follow boat
+      // Camera follow
       const camSpeed = 1 - Math.pow(0.1, delta);
       this.controls.target.lerp(this.boat.position, camSpeed);
     }
