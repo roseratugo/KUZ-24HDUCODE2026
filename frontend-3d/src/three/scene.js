@@ -139,6 +139,10 @@ export class GameScene {
       this.boat = await loadBoat();
       this.boat.position.set(0, 9, 0);
       this.scene.add(this.boat);
+
+      // Debug axes: R=X, G=Y, B=Z (arrow points forward)
+      const axes = new THREE.AxesHelper(20);
+      this.boat.add(axes);
     } catch (err) {
       console.error('Ship model load failed, using fallback');
       // Fallback: simple box
@@ -388,8 +392,8 @@ export class GameScene {
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
-      // Apply rotation (offset for Vogue Merry model which faces +X by default)
-      this.boat.rotation.y = this.boatHeading + Math.PI / 2;
+      // Apply rotation (model bow aligned on +Z via boat.js rotation)
+      this.boat.rotation.y = this.boatHeading;
 
       // Roll into turns
       const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
