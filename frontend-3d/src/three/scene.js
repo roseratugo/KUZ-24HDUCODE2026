@@ -432,7 +432,7 @@ export class GameScene {
       } else {
         const targetPitch = -speed * 0.03 + Math.sin(time * 1.2) * 0.015;
         this.boat.rotation.x = THREE.MathUtils.lerp(this.boat.rotation.x, targetPitch, 1 - Math.pow(0.05, delta));
-        this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, targetRoll, 1 - Math.pow(0.005, delta));
+        this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, 0, 1 - Math.pow(0.005, delta));
       }
 
       // Bobbing + jump
