@@ -159,10 +159,7 @@ onUnmounted(() => {
         >
           Broker
         </button>
-      </div>
-
-      <div :class="['grid-layout', { 'marketplace-mode': activeTab === 'marketplace' || activeTab === 'broker' }]">
-        <div v-show="activeTab !== 'marketplace' && activeTab !== 'broker'" class="col-left">
+        <button
           :class="['tab', { active: activeTab === 'bots' }]"
           @click="activeTab = 'bots'"
         >
@@ -170,14 +167,13 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <div :class="['grid-layout', { 'marketplace-mode': activeTab === 'marketplace' || activeTab === 'bots' }]">
-        <div v-show="activeTab !== 'marketplace' && activeTab !== 'bots'" class="col-left">
+      <div :class="['grid-layout', { 'marketplace-mode': activeTab === 'marketplace' || activeTab === 'broker' || activeTab === 'bots' }]">
+        <div v-show="activeTab !== 'marketplace' && activeTab !== 'broker' && activeTab !== 'bots'" class="col-left">
           <PlayerInfo />
           <ResourcesDisplay />
           <IslandsDisplay />
         </div>
-        <div :class="['col-center', { 'col-full': activeTab === 'marketplace' || activeTab === 'broker' }]">
-        <div :class="['col-center', { 'col-full': activeTab === 'marketplace' || activeTab === 'bots' }]">
+        <div :class="['col-center', { 'col-full': activeTab === 'marketplace' || activeTab === 'broker' || activeTab === 'bots' }]">
           <div v-show="activeTab === 'map'" class="tab-content">
             <WorldMap />
           </div>
@@ -199,13 +195,11 @@ onUnmounted(() => {
           <div v-show="activeTab === 'broker'" class="tab-content">
             <BrokerPanel />
           </div>
-        </div>
-        <div v-show="activeTab !== 'marketplace' && activeTab !== 'broker'" class="col-right">
           <div v-show="activeTab === 'bots'" class="tab-content">
             <BotsPanel />
           </div>
         </div>
-        <div v-show="activeTab !== 'marketplace' && activeTab !== 'bots'" class="col-right">
+        <div v-show="activeTab !== 'marketplace' && activeTab !== 'broker' && activeTab !== 'bots'" class="col-right">
           <ShipControl />
         </div>
       </div>
