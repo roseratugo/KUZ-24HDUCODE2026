@@ -79,15 +79,17 @@ onMounted(async () => {
       throw new Error('No data from backend');
     }
 
-    cellCount.value = cells.length;
-    islandCount.value = islands.length;
-    gameScene.updateCells(cells);
-    allCells.value = gameScene.cells;
-
+    // Set ship position FIRST so islands are generated around the boat
     if (shipPosition) {
       shipPos.value = { x: shipPosition.x, y: shipPosition.y };
       gameScene.updateShipPosition(shipPosition);
     }
+
+    // Then load cells (filtered by ship position radius)
+    cellCount.value = cells.length;
+    islandCount.value = islands.length;
+    gameScene.updateCells(cells);
+    allCells.value = gameScene.cells;
 
     // WebSocket for real-time updates
     disconnectWs = connectWebSocket(({ event, data }) => {
