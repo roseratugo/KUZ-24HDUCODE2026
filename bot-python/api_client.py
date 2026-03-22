@@ -65,6 +65,14 @@ class GameAPIClient:
         except:
             return None
 
+    def get_taxes(self) -> list:
+        """Récupère la liste des taxes (RESCUE, etc.)"""
+        return self._request("GET", "/taxes")
+
+    def pay_tax(self, tax_id: str) -> dict:
+        """Paie une taxe par son ID"""
+        return self._request("POST", f"/taxes/{tax_id}")
+
 
 class BackendAPIClient:
     """Client pour l'API backend (déclenche les broadcasts WebSocket)"""
