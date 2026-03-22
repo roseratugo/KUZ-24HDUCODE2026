@@ -31,6 +31,7 @@ export class GameScene {
 
     // Scene
     this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x8eafc1, 0.0012);
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 20000);
@@ -62,7 +63,7 @@ export class GameScene {
       sunColor: 0xffffff,
       waterColor: 0x001e0f,
       distortionScale: 3.7,
-      fog: this.scene.fog !== undefined
+      fog: true
     });
     this.water.rotation.x = -Math.PI / 2;
     this.water.position.y = 0;
