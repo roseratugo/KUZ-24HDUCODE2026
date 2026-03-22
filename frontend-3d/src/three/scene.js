@@ -274,7 +274,19 @@ export class GameScene {
     const clusters = this.islandManager.findClusters();
     for (let i = 0; i < clusters.length; i++) {
       const cells = clusters[i];
-      if (cells.length < 3) continue; // skip tiny islands
+      if (cells.length < 3) continue;
+
+      // Only spawn birds on real islands (cells with island data)
+      // Check if any cell in the cluster belongs to a known island
+      let isRealIsland = false;
+      for (const c of cells) {
+        const stored = this.cells.get(`${c.x},${c.y}`);
+        if (stored && stored.island) {
+          isRealIsland = true;
+          break;
+        }
+      }
+      if (!isRealIsland) continue;
 
       // Compute island center in scene coords
       let sumX = 0, sumY = 0;
@@ -376,7 +388,7 @@ export class GameScene {
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
       // Apply rotation (+90 offset for model orientation)
-      this.boat.rotation.y = this.boatHeading + Math.PI / 2 + Math.PI;
+      this.boat.rotation.y = this.boatHeading - Math.PI / 2;
 
       // Roll into turns
       const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
