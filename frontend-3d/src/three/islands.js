@@ -394,11 +394,14 @@ export class IslandManager {
     if (hash === this.lastHash) return;
     this.lastHash = hash;
 
-    // Clear existing
+    // Clear existing (clones share template geometry, just remove from scene)
     for (const [, mesh] of this.islandMeshes) {
       this.scene.remove(mesh);
     }
     this.islandMeshes.clear();
+
+    // Faster hash for clusters — avoid nested map/min/max
+    // (already computed above)
 
     // Place clones
     clusters.forEach((cells, i) => {
