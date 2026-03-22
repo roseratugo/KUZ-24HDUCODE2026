@@ -9,8 +9,10 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
+    "amqplib": "^0.10.4",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "mongoose": "^8.0.3"
+    "mongoose": "^8.0.3",
+    "ws": "^8.16.0"
   }
 }

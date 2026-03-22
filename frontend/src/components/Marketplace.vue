@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Line } from 'vue-chartjs';
 import {
   Chart as ChartJS,
@@ -12,9 +12,9 @@ import {
   Legend,
   Filler
 } from 'chart.js';
-import { marketplaceApi } from '../api/client';
-import { pricesApi } from '../api/mapApi';
 import { usePlayerStore } from '../stores/player';
+import { useMarketplaceStore } from '../stores/marketplace';
+import { useBrokerStore } from '../stores/broker';
 
 ChartJS.register(
   CategoryScale,
@@ -28,19 +28,32 @@ ChartJS.register(
 );
 
 const playerStore = usePlayerStore();
+const marketplaceStore = useMarketplaceStore();
+const brokerStore = useBrokerStore();
 
-const offers = ref([]);
 const loading = ref(false);
 const initialLoading = ref(true);
 const error = ref(null);
 const showCreateForm = ref(false);
 const editingOffer = ref(null);
 const selectedResource = ref('BOISIUM');
-const countdown = ref(5);
-const priceHistory = ref({
-  BOISIUM: [],
-  FERONIUM: [],
-  CHARBONIUM: []
+
+// Utiliser les donnees du store
+const offers = computed(() => marketplaceStore.offers);
+const priceHistory = computed(() => {
+  // Convertir le format du store pour le graphique
+  const history = {};
+  for (const type of ['BOISIUM', 'FERONIUM', 'CHARBONIUM']) {
+    const storeHistory = marketplaceStore.priceHistory[type] || [];
+    history[type] = storeHistory.map(h => ({
+      time: new Date(h.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      avg: h.avgPrice,
+      min: h.minPrice,
+      max: h.maxPrice,
+      count: h.offerCount
+    }));
+  }
+  return history;
 });
 
 const newOffer = ref({
@@ -50,8 +63,6 @@ const newOffer = ref({
 });
 
 const purchaseQuantity = ref({});
-let refreshInterval = null;
-let countdownInterval = null;
 
 const resourceConfig = {
   BOISIUM: { color: '#cd853f', bgColor: 'rgba(205, 133, 63, 0.2)', chartColor: 'rgb(205, 133, 63)', icon: '🪵', label: 'Boisium' },
@@ -59,10 +70,25 @@ const resourceConfig = {
   CHARBONIUM: { color: '#525252', bgColor: 'rgba(82, 82, 82, 0.2)', chartColor: 'rgb(82, 82, 82)', icon: '⬛', label: 'Charbonium' }
 };
 
+// Status broker pour affichage
+const brokerConnected = computed(() => brokerStore.isConnected);
+const lastUpdate = computed(() => marketplaceStore.lastUpdate);
+
 const playerName = computed(() => playerStore.details?.name || '');
+const playerId = computed(() => playerStore.details?.id || '');
 const playerMoney = computed(() => playerStore.details?.money || 0);
-const myOffers = computed(() => offers.value.filter(o => o.owner?.name === playerName.value));
-const otherOffers = computed(() => offers.value.filter(o => o.owner?.name !== playerName.value));
+
+// Comparer par ID ou par name selon le format de owner
+const isMyOffer = (offer) => {
+  if (!offer.owner) return false;
+  // owner peut etre un objet {id, name} ou juste un string ID
+  const ownerId = typeof offer.owner === 'object' ? offer.owner.id : offer.owner;
+  const ownerName = typeof offer.owner === 'object' ? offer.owner.name : null;
+  return ownerId === playerId.value || ownerName === playerName.value;
+};
+
+const myOffers = computed(() => offers.value.filter(isMyOffer));
+const otherOffers = computed(() => offers.value.filter(o => !isMyOffer(o)));
 
 // Stats par ressource
 const resourceStats = computed(() => {
@@ -188,9 +214,7 @@ const fetchOffers = async (showLoading = false) => {
   }
   error.value = null;
   try {
-    const response = await marketplaceApi.getOffers();
-    offers.value = response.data || [];
-    updatePriceHistory();
+    await marketplaceStore.fetchOffers();
   } catch (err) {
     error.value = err.response?.data?.message || 'Erreur lors du chargement des offres';
     console.error('Error fetching offers:', err);
@@ -200,109 +224,16 @@ const fetchOffers = async (showLoading = false) => {
   }
 };
 
-const updatePriceHistory = async () => {
-  const now = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const snapshots = [];
-
-  for (const type of ['BOISIUM', 'FERONIUM', 'CHARBONIUM']) {
-    const typeOffers = offers.value.filter(o => o.resourceType === type);
-    if (typeOffers.length > 0) {
-      const avgPrice = Math.round(typeOffers.reduce((sum, o) => sum + o.pricePerResource, 0) / typeOffers.length);
-      const minPrice = Math.min(...typeOffers.map(o => o.pricePerResource));
-      const maxPrice = Math.max(...typeOffers.map(o => o.pricePerResource));
-      const totalQuantity = typeOffers.reduce((sum, o) => sum + o.quantityIn, 0);
-
-      const entry = {
-        time: now,
-        avg: avgPrice,
-        min: minPrice,
-        max: maxPrice,
-        count: typeOffers.length,
-        totalQuantity
-      };
-
-      priceHistory.value[type].push(entry);
-
-      // Garder les 500 derniers points en local pour le graphique
-      if (priceHistory.value[type].length > 500) {
-        priceHistory.value[type].shift();
-      }
-
-      // Prepare for DB save
-      snapshots.push({
-        resourceType: type,
-        avgPrice,
-        minPrice,
-        maxPrice,
-        offerCount: typeOffers.length,
-        totalQuantity
-      });
-    }
-  }
-
-  // Save to DB (fire and forget)
-  if (snapshots.length > 0) {
-    pricesApi.saveBulk(snapshots).catch(err => {
-      console.error('Failed to save price history to DB:', err);
-    });
-  }
-};
-
-const loadPriceHistory = async () => {
-  try {
-    const response = await pricesApi.getAll();
-    const dbHistory = response.data;
-
-    // Merge DB history with local format (sous-echantillonnage pour le graphique)
-    const maxPoints = 500;
-    for (const type of ['BOISIUM', 'FERONIUM', 'CHARBONIUM']) {
-      if (dbHistory[type] && dbHistory[type].length > 0) {
-        let data = dbHistory[type];
-
-        // Sous-echantillonner si trop de donnees pour le graphique
-        if (data.length > maxPoints) {
-          const step = Math.ceil(data.length / maxPoints);
-          data = data.filter((_, i) => i % step === 0 || i === data.length - 1);
-        }
-
-        priceHistory.value[type] = data.map(h => ({
-          time: new Date(h.time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          avg: h.avg,
-          min: h.min,
-          max: h.max,
-          count: h.count
-        }));
-      }
-    }
-  } catch (err) {
-    console.error('Failed to load price history from DB:', err);
-  }
-};
-
-const startAutoRefresh = () => {
-  // Refresh toutes les 5 secondes
-  refreshInterval = setInterval(() => {
-    fetchOffers();
-    countdown.value = 5;
-  }, 5000);
-
-  // Countdown
-  countdownInterval = setInterval(() => {
-    countdown.value = countdown.value > 0 ? countdown.value - 1 : 5;
-  }, 1000);
-};
-
 const createOffer = async () => {
   error.value = null;
   try {
-    await marketplaceApi.createOffer({
-      resourceType: newOffer.value.resourceType,
-      quantityIn: parseInt(newOffer.value.quantityIn),
-      pricePerResource: parseInt(newOffer.value.pricePerResource)
-    });
+    await marketplaceStore.createOffer(
+      newOffer.value.resourceType,
+      parseInt(newOffer.value.quantityIn),
+      parseInt(newOffer.value.pricePerResource)
+    );
     showCreateForm.value = false;
     newOffer.value = { resourceType: 'BOISIUM', quantityIn: 1, pricePerResource: 1 };
-    await fetchOffers();
     await playerStore.fetchResources();
   } catch (err) {
     error.value = err.response?.data?.message || 'Erreur lors de la creation de l\'offre';
@@ -314,29 +245,15 @@ const updateOffer = async () => {
   if (!editingOffer.value) return;
   error.value = null;
 
-  const payload = {
-    resourceType: editingOffer.value.resourceType,
-    quantityIn: Math.floor(Number(editingOffer.value.quantityIn)),
-    pricePerResource: Math.floor(Number(editingOffer.value.pricePerResource))
-  };
-
-  console.log('=== UPDATE OFFER DEBUG ===');
-  console.log('Offer ID:', editingOffer.value.id);
-  console.log('Payload:', JSON.stringify(payload));
-  console.log('Full URL: /marketplace/offers/' + editingOffer.value.id);
-
   try {
-    const response = await marketplaceApi.updateOffer(editingOffer.value.id, payload);
-    console.log('Update success:', response.data);
+    await marketplaceStore.updateOffer(
+      editingOffer.value.id,
+      Math.floor(Number(editingOffer.value.quantityIn)),
+      Math.floor(Number(editingOffer.value.pricePerResource))
+    );
     editingOffer.value = null;
-    await fetchOffers();
   } catch (err) {
-    console.error('=== UPDATE OFFER ERROR ===');
-    console.error('Status:', err.response?.status);
-    console.error('Status Text:', err.response?.statusText);
-    console.error('Response Data:', JSON.stringify(err.response?.data, null, 2));
-    console.error('Response Headers:', err.response?.headers);
-    console.error('Full Error:', err);
+    console.error('Update offer error:', err);
     error.value = err.response?.data?.message || JSON.stringify(err.response?.data) || 'Erreur lors de la mise a jour';
   }
 };
@@ -345,8 +262,7 @@ const deleteOffer = async (id) => {
   if (!confirm('Supprimer cette offre?')) return;
   error.value = null;
   try {
-    await marketplaceApi.deleteOffer(id);
-    await fetchOffers();
+    await marketplaceStore.deleteOffer(id);
     await playerStore.fetchResources();
   } catch (err) {
     error.value = err.response?.data?.message || 'Erreur lors de la suppression';
@@ -362,9 +278,8 @@ const purchaseOffer = async (offer) => {
   }
   error.value = null;
   try {
-    await marketplaceApi.purchase(offer.id, qty);
+    await marketplaceStore.purchase(offer.id, qty);
     purchaseQuantity.value[offer.id] = 1;
-    await fetchOffers();
     await playerStore.refreshAll();
   } catch (err) {
     error.value = err.response?.data?.message || 'Erreur lors de l\'achat';
@@ -407,8 +322,7 @@ const purchaseMax = async (offer) => {
   }
   error.value = null;
   try {
-    await marketplaceApi.purchase(offer.id, maxQty);
-    await fetchOffers();
+    await marketplaceStore.purchase(offer.id, maxQty);
     await playerStore.refreshAll();
   } catch (err) {
     error.value = err.response?.data?.message || 'Erreur lors de l\'achat';
@@ -427,14 +341,14 @@ const getPriceChange = (type) => {
 };
 
 onMounted(async () => {
-  await loadPriceHistory(); // Load history from DB first
-  fetchOffers(true); // Show loading only on initial load
-  startAutoRefresh();
+  // Initialiser le store marketplace (charge les donnees et s'abonne au broker)
+  await marketplaceStore.init();
+  initialLoading.value = false;
 });
 
 onUnmounted(() => {
-  if (refreshInterval) clearInterval(refreshInterval);
-  if (countdownInterval) clearInterval(countdownInterval);
+  // Cleanup des subscriptions
+  marketplaceStore.cleanup();
 });
 </script>
 
@@ -447,8 +361,9 @@ onUnmounted(() => {
         <span class="subtitle">Trading & Echanges</span>
       </div>
       <div class="header-right">
-        <div class="auto-refresh">
-          <span class="refresh-indicator">🔄 {{ countdown }}s</span>
+        <div :class="['broker-status', brokerConnected ? 'connected' : 'disconnected']">
+          <span class="status-dot"></span>
+          <span class="status-text">{{ brokerConnected ? 'Temps réel' : 'Hors ligne' }}</span>
         </div>
         <div class="balance">
           <span class="balance-label">Solde</span>
@@ -771,17 +686,56 @@ onUnmounted(() => {
   gap: 15px;
 }
 
-.auto-refresh {
-  background: rgba(34, 197, 94, 0.15);
-  border: 1px solid #22c55e;
+.broker-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 14px;
   border-radius: 20px;
 }
 
-.refresh-indicator {
-  color: #22c55e;
+.broker-status.connected {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid #22c55e;
+}
+
+.broker-status.disconnected {
+  background: rgba(248, 81, 73, 0.15);
+  border: 1px solid #f85149;
+}
+
+.broker-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.broker-status.connected .status-dot {
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  animation: pulse 2s infinite;
+}
+
+.broker-status.disconnected .status-dot {
+  background: #f85149;
+}
+
+.broker-status .status-text {
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.broker-status.connected .status-text {
+  color: #22c55e;
+}
+
+.broker-status.disconnected .status-text {
+  color: #f85149;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .balance {
