@@ -330,7 +330,7 @@ export class IslandManager {
   }
 
   addCell(cell) {
-    if (cell.type !== 'SAND' && !cell.island) return;
+    if (cell.type !== 'SAND') return;
     const key = `${cell.x},${cell.y}`;
     if (this.sandCells.has(key)) return;
     this.sandCells.set(key, cell);
