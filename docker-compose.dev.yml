@@ -35,6 +35,21 @@ services:
       mongodb:
         condition: service_healthy
 
+  mongo-express:
+    image: mongo-express:latest
+    container_name: kuz-mongo-express
+    restart: unless-stopped
+    environment:
+      - ME_CONFIG_MONGODB_URL=mongodb://mongodb:27017/kuz3026
+      - ME_CONFIG_BASICAUTH=false
+    ports:
+      - "8081:8081"
+    networks:
+      - kuz-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend
@@ -46,6 +61,19 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    networks:
+      - kuz-network
+    depends_on:
+      - backend
+
+  frontend-3d:
+    build:
+      context: ./frontend-3d
+      dockerfile: Dockerfile
+    container_name: kuz-frontend-3d
+    restart: unless-stopped
+    ports:
+      - "3002:80"
     networks:
       - kuz-network
     depends_on:

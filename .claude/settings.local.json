@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/zaki7/Documents/24h/KUZ-24HDUCODE2026 -type f -name *migration* -o -name *seed* -o -name *script*)",
+      "Bash(npm install:*)",
+      "Bash(npx vite:*)",
+      "Bash(find /c/Users/zaki7/Documents/24h/KUZ-24HDUCODE2026 -maxdepth 2 -name .env* -o -name vite.config* -o -name README*)",
+      "Bash(python -c \"import requests; import pymongo; print\\(''OK''\\)\")",
+      "Bash(pip install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(python -m pip install requests pymongo)",
+      "Bash(python3 -m pip install requests pymongo)",
+      "Bash(find /c/Users/zaki7/Documents/24h/KUZ-24HDUCODE2026/bot -type f \\\\\\(-name vite.config.* -o -name docker-compose*.yml \\\\\\))",
+      "Bash(curl:*)",
+      "Bash(python -m json.tool)",
+      "Read(//tmp/**)",
+      "Bash(xargs wc:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(node -e \":*)",
+      "Bash(timeout 15 node -e \":*)",
+      "Bash(docker compose:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}

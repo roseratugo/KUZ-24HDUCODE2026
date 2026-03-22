@@ -1,5 +1,6 @@
 import express from 'express';
 import ShipPosition from '../models/ShipPosition.js';
+import { broadcast } from '../ws.js';
 
 const router = express.Router();
 
@@ -23,6 +24,8 @@ router.put('/:gameId', async (req, res) => {
       { x, y, type, zone },
       { upsert: true, new: true }
     );
+    broadcast('ship:position', { gameId: req.params.gameId, position: pos });
+
     res.json(pos);
   } catch (error) {
     res.status(500).json({ error: error.message });

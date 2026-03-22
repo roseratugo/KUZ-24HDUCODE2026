@@ -15,6 +15,10 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/backend-api/, '/api')
+      },
+      '/ws': {
+        target: 'ws://localhost:3001',
+        ws: true
       }
     }
   }

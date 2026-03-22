@@ -20,6 +20,8 @@ jobs:
         include:
           - service: frontend
             context: ./frontend
+          - service: frontend-3d
+            context: ./frontend-3d
           - service: backend
             context: ./backend
     steps:
