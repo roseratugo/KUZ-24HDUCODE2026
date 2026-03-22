@@ -23,6 +23,11 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - MONGODB_URI=mongodb://mongodb:27017/kuz3026
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     networks:
       - kuz-network
     depends_on:
