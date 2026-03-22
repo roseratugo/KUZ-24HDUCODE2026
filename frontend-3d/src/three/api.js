@@ -1,11 +1,11 @@
-import axios from 'axios';
+import axios from "axios";
 
-const GAME_ID = 'kuz-team';
+const GAME_ID = "kuz-team";
 
 const client = axios.create({
-  baseURL: '/backend-api',
-  headers: { 'Content-Type': 'application/json' },
-  timeout: 3000
+  baseURL: "/backend-api",
+  headers: { "Content-Type": "application/json" },
+  timeout: 3000,
 });
 
 export async function fetchCells() {
@@ -24,7 +24,7 @@ export async function fetchShipPosition() {
 }
 
 export function connectWebSocket(onMessage) {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${protocol}//${window.location.host}/ws`;
 
   let ws = null;
@@ -34,8 +34,8 @@ export function connectWebSocket(onMessage) {
     ws = new WebSocket(url);
 
     ws.onopen = () => {
-      console.log('[3D] WebSocket connected');
-      onMessage({ event: 'ws:connected' });
+      console.log("[3D] WebSocket connected");
+      onMessage({ event: "ws:connected" });
     };
 
     ws.onmessage = (event) => {
@@ -43,13 +43,13 @@ export function connectWebSocket(onMessage) {
         const data = JSON.parse(event.data);
         onMessage(data);
       } catch (e) {
-        console.error('[3D] WS parse error', e);
+        console.error("[3D] WS parse error", e);
       }
     };
 
     ws.onclose = () => {
-      console.log('[3D] WebSocket disconnected, reconnecting...');
-      onMessage({ event: 'ws:disconnected' });
+      console.log("[3D] WebSocket disconnected, reconnecting...");
+      onMessage({ event: "ws:disconnected" });
       reconnectTimer = setTimeout(connect, 3000);
     };
 
