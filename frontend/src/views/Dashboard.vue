@@ -1,7 +1,9 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { usePlayerStore } from '../stores/player';
 import { useShipStore } from '../stores/ship';
+import { useBrokerStore } from '../stores/broker';
+import { CREDENTIALS } from '../api/config';
 import PlayerInfo from '../components/PlayerInfo.vue';
 import ResourcesDisplay from '../components/ResourcesDisplay.vue';
 import IslandsDisplay from '../components/IslandsDisplay.vue';
@@ -12,38 +14,45 @@ import TheftsPanel from '../components/TheftsPanel.vue';
 import ShipUpgradePanel from '../components/ShipUpgradePanel.vue';
 import StorageUpgradePanel from '../components/StorageUpgradePanel.vue';
 import Marketplace from '../components/Marketplace.vue';
+import BrokerPanel from '../components/BrokerPanel.vue';
 import BotsPanel from '../components/BotsPanel.vue';
 
 const playerStore = usePlayerStore();
 const shipStore = useShipStore();
+const brokerStore = useBrokerStore();
+
 const lastRefresh = ref(null);
 const activeTab = ref('map');
 const autoRefreshEnabled = ref(true);
-const countdown = ref(5);
+const countdown = ref(30); // Polling reduit a 30s car broker en temps reel
 
 let autoRefreshInterval = null;
 let countdownInterval = null;
+
+// Status broker
+const brokerConnected = computed(() => brokerStore.isConnected);
 
 const refresh = () => {
   playerStore.refreshAll().then(() => {
     lastRefresh.value = new Date().toLocaleTimeString();
   });
-  countdown.value = 5;
+  countdown.value = 30;
 };
 
 const startAutoRefresh = () => {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
   if (countdownInterval) clearInterval(countdownInterval);
 
+  // Polling reduit a 30 secondes (le broker gere les mises a jour en temps reel)
   autoRefreshInterval = setInterval(() => {
     if (autoRefreshEnabled.value) {
       refresh();
     }
-  }, 5000);
+  }, 30000);
 
   countdownInterval = setInterval(() => {
     if (autoRefreshEnabled.value) {
-      countdown.value = countdown.value > 0 ? countdown.value - 1 : 5;
+      countdown.value = countdown.value > 0 ? countdown.value - 1 : 30;
     }
   }, 1000);
 };
@@ -51,19 +60,29 @@ const startAutoRefresh = () => {
 const toggleAutoRefresh = () => {
   autoRefreshEnabled.value = !autoRefreshEnabled.value;
   if (autoRefreshEnabled.value) {
-    countdown.value = 5;
+    countdown.value = 30;
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
   shipStore.loadPositionFromDB();
-  refresh();
+
+  // Charger les donnees initiales
+  await playerStore.refreshAll();
+  lastRefresh.value = new Date().toLocaleTimeString();
+
+  // Connecter le broker si les donnees joueur sont disponibles
+  if (playerStore.details?.id) {
+    brokerStore.connect(playerStore.details.id, CREDENTIALS.brokerTeamName);
+  }
+
   startAutoRefresh();
 });
 
 onUnmounted(() => {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
   if (countdownInterval) clearInterval(countdownInterval);
+  brokerStore.disconnect();
 });
 </script>
 
@@ -75,6 +94,10 @@ onUnmounted(() => {
         <p class="subtitle">Explorez, commercez, decouvrez le nouveau monde</p>
       </div>
       <div class="header-actions">
+        <div :class="['broker-indicator', brokerConnected ? 'connected' : 'disconnected']">
+          <span class="broker-dot"></span>
+          <span class="broker-label">{{ brokerConnected ? 'Broker OK' : 'Broker OFF' }}</span>
+        </div>
         <div class="auto-refresh-toggle">
           <button
             :class="['toggle-btn', { active: autoRefreshEnabled }]"
@@ -131,6 +154,15 @@ onUnmounted(() => {
           Marketplace
         </button>
         <button
+          :class="['tab', { active: activeTab === 'broker' }]"
+          @click="activeTab = 'broker'"
+        >
+          Broker
+        </button>
+      </div>
+
+      <div :class="['grid-layout', { 'marketplace-mode': activeTab === 'marketplace' || activeTab === 'broker' }]">
+        <div v-show="activeTab !== 'marketplace' && activeTab !== 'broker'" class="col-left">
           :class="['tab', { active: activeTab === 'bots' }]"
           @click="activeTab = 'bots'"
         >
@@ -144,6 +176,7 @@ onUnmounted(() => {
           <ResourcesDisplay />
           <IslandsDisplay />
         </div>
+        <div :class="['col-center', { 'col-full': activeTab === 'marketplace' || activeTab === 'broker' }]">
         <div :class="['col-center', { 'col-full': activeTab === 'marketplace' || activeTab === 'bots' }]">
           <div v-show="activeTab === 'map'" class="tab-content">
             <WorldMap />
@@ -163,6 +196,11 @@ onUnmounted(() => {
           <div v-show="activeTab === 'marketplace'" class="tab-content">
             <Marketplace />
           </div>
+          <div v-show="activeTab === 'broker'" class="tab-content">
+            <BrokerPanel />
+          </div>
+        </div>
+        <div v-show="activeTab !== 'marketplace' && activeTab !== 'broker'" class="col-right">
           <div v-show="activeTab === 'bots'" class="tab-content">
             <BotsPanel />
           </div>
@@ -211,6 +249,55 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.broker-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.broker-indicator.connected {
+  background: rgba(34, 197, 94, 0.2);
+  border: 1px solid #22c55e;
+}
+
+.broker-indicator.disconnected {
+  background: rgba(248, 81, 73, 0.2);
+  border: 1px solid #f85149;
+}
+
+.broker-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.broker-indicator.connected .broker-dot {
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  animation: broker-pulse 2s infinite;
+}
+
+.broker-indicator.disconnected .broker-dot {
+  background: #f85149;
+}
+
+.broker-indicator.connected .broker-label {
+  color: #22c55e;
+}
+
+.broker-indicator.disconnected .broker-label {
+  color: #f85149;
+}
+
+@keyframes broker-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .auto-refresh-toggle .toggle-btn {

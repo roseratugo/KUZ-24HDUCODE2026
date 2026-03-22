@@ -47,6 +47,15 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     const duration = error.config?.metadata ? Date.now() - error.config.metadata.startTime : null;
+
+    // Debug: log complet de l'erreur
+    console.error(`[API Error] ${error.config?.method?.toUpperCase()} ${error.config?.url}`, {
+      status: error.response?.status || 'No response',
+      responseData: error.response?.data,
+      requestHeaders: error.config?.headers,
+      requestBody: error.config?.data ? (() => { try { return JSON.parse(error.config.data); } catch { return error.config.data; } })() : null
+    });
+
     if (historyStore && shouldLogToHistory(error.config?.url)) {
       historyStore.addRequest({
         method: error.config?.method,
@@ -54,7 +63,7 @@ apiClient.interceptors.response.use(
         status: error.response?.status || 0,
         success: false,
         data: error.config?.data ? JSON.parse(error.config.data) : null,
-        error: error.response?.data?.message || error.message,
+        error: error.response?.data?.message || error.response?.data?.error || JSON.stringify(error.response?.data) || error.message,
         duration
       });
     }
