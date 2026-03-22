@@ -27,6 +27,7 @@ let gameScene = null;
 const getCamera = () => gameScene?.camera;
 const getTarget = () => gameScene?.controls?.target;
 let disconnectWs = null;
+let positionPollTimer = null;
 
 // Demo data for dev mode (no backend)
 function loadDevFallback() {
@@ -105,6 +106,17 @@ onMounted(async () => {
     gameScene.updateCells(cells);
     allCells.value = gameScene.cells;
 
+    // Poll ship position every 5s
+    positionPollTimer = setInterval(async () => {
+      try {
+        const pos = await fetchShipPosition();
+        if (pos) {
+          shipPos.value = { x: pos.x, y: pos.y };
+          gameScene.updateShipPosition(pos);
+        }
+      } catch (e) { /* ignore */ }
+    }, 5000);
+
     // WebSocket for real-time updates
     disconnectWs = connectWebSocket(({ event, data }) => {
       if (event === 'ws:connected') { wsConnected.value = true; return; }
@@ -137,6 +149,7 @@ function onShipMoved(position) {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown);
+  if (positionPollTimer) clearInterval(positionPollTimer);
   if (disconnectWs) disconnectWs();
   if (gameScene) gameScene.dispose();
 });
