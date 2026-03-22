@@ -382,8 +382,15 @@ export class GameScene {
       this.boat.position.z += (this.smoothedTarget.z - this.boat.position.z) * lerpSpeed;
 
       // Heading: face direction of movement
-      if (distToTarget > 0.5) {
-        this.targetHeading = Math.atan2(toTarget.x, toTarget.z);
+      if (distToTarget > 2) {
+        const newHeading = Math.atan2(toTarget.x, toTarget.z);
+        // Only update heading if the direction change is significant (> ~5°)
+        let angleDiff = newHeading - this.targetHeading;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        if (Math.abs(angleDiff) > 0.08) {
+          this.targetHeading = newHeading;
+        }
       }
 
       // Smooth turn
