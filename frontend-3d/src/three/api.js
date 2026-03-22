@@ -80,6 +80,36 @@ export async function launchTheft(resourceType, moneySpent) {
   return res.data;
 }
 
+// Bot
+export async function botStart() {
+  const res = await client.post('/bot/start');
+  return res.data;
+}
+export async function botStop() {
+  const res = await client.post('/bot/stop');
+  return res.data;
+}
+export async function botPause() {
+  const res = await client.post('/bot/pause');
+  return res.data;
+}
+export async function botResume() {
+  const res = await client.post('/bot/resume');
+  return res.data;
+}
+export async function botStatus() {
+  const res = await client.get('/bot/status');
+  return res.data;
+}
+export async function botLogs(since = 0) {
+  const res = await client.get(`/bot/logs?since=${since}`);
+  return res.data;
+}
+export async function botClearLogs() {
+  const res = await client.delete('/bot/logs');
+  return res.data;
+}
+
 export function connectWebSocket(onMessage) {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${protocol}//${window.location.host}/ws`;
