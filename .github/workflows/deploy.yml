@@ -24,6 +24,8 @@ jobs:
             context: ./frontend-3d
           - service: backend
             context: ./backend
+          - service: bot-python
+            context: ./bot-python
     steps:
       - uses: actions/checkout@v4
 
