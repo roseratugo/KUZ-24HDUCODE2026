@@ -1,33 +1,36 @@
 import Cell from '../models/Cell.js';
 import Island from '../models/Island.js';
 import Move from '../models/Move.js';
+import ShipPosition from '../models/ShipPosition.js';
 import { broadcast } from '../ws.js';
 
 const GAME_API = 'http://ec2-15-237-116-133.eu-west-3.compute.amazonaws.com:8443';
 const CODINGGAME_ID = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjb2RpbmdnYW1lIiwic3ViIjoiZTQ2MmE1ZWItOWQxNi00M2Q2LTg4MTYtMzc2N2MzMzZiZjczIiwicm9sZXMiOlsiVVNFUiJdfQ.i4gq-3ey6r0m1BOQjGTcjhvONZe9UXmPJo8ojcMf-7k';
 const GAME_ID = process.env.GAME_ID || 'kuz-default';
-const SAFETY_BUFFER = 3;
+const SAFETY_BUFFER = 4;
 
 class ExplorerBot {
   constructor() {
     this.running = false;
     this.paused = false;
     this.state = 'IDLE';
-    this.position = null;
+    this.position = null;    // {x, y, type, zone}
     this.energy = 0;
-    this.maxEnergy = 15;
-    this.speed = 5000;
-    this.visibilityRange = 1;
+    this.maxEnergy = 100;
+    this.speed = 800;        // ms cooldown between moves
+    this.visibilityRange = 4;
 
-    // Known island cells where we can recharge
-    this.knownIslandCells = [];
-    this.homeIslandCells = [];
-    this.startPosition = null;
+    // Recharge points: SAND cells of KNOWN islands
+    this.rechargePoints = [];
+    // Home island name (from API)
+    this.homeIslandName = null;
+    // Names of KNOWN islands (from API)
+    this.knownIslandNames = new Set();
 
-    // Exploration tracking
+    // Stats
     this.visitedPositions = new Set();
     this.discoveredCellsCount = 0;
-    this.islandsFound = 0;
+    this.islandsFound = new Set();  // unique island names
     this.moveCount = 0;
 
     // Spiral state
@@ -45,7 +48,9 @@ class ExplorerBot {
     this.startTime = null;
   }
 
-  // --- Logging ---
+  // ========================
+  // LOGGING
+  // ========================
   log(message, type = 'info') {
     const entry = {
       id: this.logs.length,
@@ -56,12 +61,12 @@ class ExplorerBot {
     this.logs.push(entry);
     if (this.logs.length > this.maxLogs) this.logs.shift();
     console.log(`[Bot:${type}] ${message}`);
-
-    // Broadcast to frontend via WebSocket
     broadcast('bot:log', entry);
   }
 
-  // --- Game API calls ---
+  // ========================
+  // GAME API
+  // ========================
   async apiCall(method, path, body = null) {
     const options = {
       method,
@@ -73,12 +78,13 @@ class ExplorerBot {
     if (body) options.body = JSON.stringify(body);
 
     const res = await fetch(`${GAME_API}${path}`, options);
+
     if (!res.ok) {
-      let errorMsg = `API ${method} ${path} failed (${res.status})`;
+      let errorMsg = `API ${res.status}`;
       try {
         const errData = await res.json();
-        errorMsg += `: ${errData.message || JSON.stringify(errData)}`;
-      } catch { /* ignore parse errors */ }
+        errorMsg = errData.message || errData.codeError || errorMsg;
+      } catch { /* ignore */ }
       throw new Error(errorMsg);
     }
     return res.json();
@@ -92,23 +98,23 @@ class ExplorerBot {
     return this.apiCall('POST', '/ship/move', { direction });
   }
 
-  // --- Distance & Navigation ---
+  // ========================
+  // DISTANCE & NAVIGATION
+  // ========================
 
-  // Chebyshev distance (diagonal moves cost 1)
+  // Chebyshev distance (diagonal = 1 move)
   chebyshev(a, b) {
+    if (!a || !b) return Infinity;
     return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
   }
 
-  // Find nearest known island cell
   findNearestRechargePoint() {
-    const allRecharge = [...this.homeIslandCells, ...this.knownIslandCells];
-    if (allRecharge.length === 0 && this.startPosition) {
-      return this.startPosition;
-    }
+    if (this.rechargePoints.length === 0) return null;
+    if (!this.position) return null;
 
     let nearest = null;
     let minDist = Infinity;
-    for (const cell of allRecharge) {
+    for (const cell of this.rechargePoints) {
       const dist = this.chebyshev(this.position, cell);
       if (dist < minDist) {
         minDist = dist;
@@ -124,42 +130,35 @@ class ExplorerBot {
     return this.chebyshev(this.position, nearest);
   }
 
-  // Get best direction to move toward a target
+  // Best direction to move toward target
   directionToward(target) {
+    if (!this.position || !target) return 'N';
     const dx = target.x - this.position.x;
     const dy = target.y - this.position.y;
 
-    // Map dx/dy to direction string
-    let dirY = '';
-    let dirX = '';
-    if (dy < 0) dirY = 'N';
-    if (dy > 0) dirY = 'S';
-    if (dx > 0) dirX = 'E';
-    if (dx < 0) dirX = 'W';
+    let dir = '';
+    if (dy < 0) dir += 'N';
+    if (dy > 0) dir += 'S';
+    if (dx > 0) dir += 'E';
+    if (dx < 0) dir += 'W';
 
-    const combined = dirY + dirX;
-    return combined || 'N';
+    return dir || 'N';
   }
 
-  // --- Spiral Exploration ---
+  // ========================
+  // SPIRAL EXPLORATION
+  // ========================
   getNextSpiralDirection() {
-    // Spiral: E(1), S(1), W(2), N(2), E(3), S(3), W(4), N(4), ...
     if (this.spiralStepsDone >= this.spiralLeg) {
       this.spiralStepsDone = 0;
       this.spiralDirIndex = (this.spiralDirIndex + 1) % 4;
       this.spiralLegsCompleted++;
-
-      // Increase leg length every 2 direction changes
       if (this.spiralLegsCompleted % 2 === 0) {
         this.spiralLeg++;
       }
     }
-
     this.spiralStepsDone++;
-
-    // Scale by visibility range for efficient coverage
-    const baseDir = this.spiralDirections[this.spiralDirIndex];
-    return baseDir;
+    return this.spiralDirections[this.spiralDirIndex];
   }
 
   resetSpiral() {
@@ -169,16 +168,21 @@ class ExplorerBot {
     this.spiralLegsCompleted = 0;
   }
 
-  // --- Energy Management ---
+  // ========================
+  // ENERGY MANAGEMENT
+  // ========================
   canSafelyExplore() {
-    const distToRecharge = this.distanceToNearestRecharge();
-    return this.energy > distToRecharge + SAFETY_BUFFER;
+    if (!this.position) return false;
+    const dist = this.distanceToNearestRecharge();
+    if (dist === Infinity) return this.energy > SAFETY_BUFFER;
+    return this.energy > dist + SAFETY_BUFFER;
   }
 
-  // --- DB Persistence ---
+  // ========================
+  // DB PERSISTENCE
+  // ========================
   async saveCellsToDB(cells) {
     if (!cells || cells.length === 0) return;
-
     const ops = cells.map(cell => ({
       updateOne: {
         filter: { gameId: GAME_ID, x: cell.x, y: cell.y },
@@ -190,36 +194,27 @@ class ExplorerBot {
             state: 'SEEN',
             lastSeenAt: new Date()
           },
-          $setOnInsert: {
-            gameId: GAME_ID,
-            discoveredAt: new Date()
-          }
+          $setOnInsert: { gameId: GAME_ID, discoveredAt: new Date() }
         },
         upsert: true
       }
     }));
-
-    try {
-      await Cell.bulkWrite(ops);
-    } catch (err) {
-      console.error('Failed to save cells to DB:', err.message);
+    try { await Cell.bulkWrite(ops); } catch (err) {
+      console.error('DB save cells error:', err.message);
     }
   }
 
-  async saveMoveToDB(direction, from, to, energyBefore, energyAfter, cellsDiscovered) {
+  async saveMoveToDB(direction, from, to, energyBefore, energyAfter, cellsCount) {
     try {
       await Move.create({
-        gameId: GAME_ID,
-        direction,
-        fromPosition: from,
-        toPosition: to,
-        energyBefore,
-        energyAfter,
-        cellsDiscovered: cellsDiscovered || 0,
+        gameId: GAME_ID, direction,
+        fromPosition: from, toPosition: to,
+        energyBefore, energyAfter,
+        cellsDiscovered: cellsCount || 0,
         timestamp: new Date()
       });
     } catch (err) {
-      console.error('Failed to save move to DB:', err.message);
+      console.error('DB save move error:', err.message);
     }
   }
 
@@ -228,29 +223,86 @@ class ExplorerBot {
       await Island.findOneAndUpdate(
         { gameId: GAME_ID, islandId: island.id },
         {
-          $set: {
-            name: island.name,
-            bonusQuotient: island.bonusQuotient,
-            state: 'DISCOVERED'
-          },
-          $setOnInsert: {
-            gameId: GAME_ID,
-            islandId: island.id,
-            cells: [],
-            discoveredAt: new Date()
-          }
+          $set: { name: island.name, bonusQuotient: island.bonusQuotient || 0 },
+          $setOnInsert: { gameId: GAME_ID, islandId: island.id, state: 'DISCOVERED', cells: [], discoveredAt: new Date() }
         },
         { upsert: true }
       );
     } catch (err) {
-      console.error('Failed to save island to DB:', err.message);
+      console.error('DB save island error:', err.message);
     }
   }
 
-  // --- Initialization ---
+  async savePositionToDB(pos) {
+    if (!pos) return;
+    try {
+      await ShipPosition.findOneAndUpdate(
+        { gameId: GAME_ID },
+        { $set: { x: pos.x, y: pos.y, type: pos.type, zone: pos.zone } },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error('DB save position error:', err.message);
+    }
+  }
+
+  // ========================
+  // LOAD RECHARGE POINTS FROM DB
+  // ========================
+  async loadRechargePoints() {
+    this.rechargePoints = [];
+
+    try {
+      // Strategy 1: Find SAND cells whose island.name matches a KNOWN island from API
+      if (this.knownIslandNames.size > 0) {
+        const knownNames = Array.from(this.knownIslandNames);
+        const sandCells = await Cell.find({
+          gameId: GAME_ID,
+          type: 'SAND',
+          'island.name': { $in: knownNames }
+        });
+        sandCells.forEach(c => {
+          this.rechargePoints.push({ x: c.x, y: c.y });
+        });
+      }
+
+      // Strategy 2: Also add SAND cells from KNOWN islands in local DB (by id)
+      if (this.rechargePoints.length === 0) {
+        const knownIslandDocs = await Island.find({ gameId: GAME_ID, state: 'KNOWN' });
+        if (knownIslandDocs.length > 0) {
+          const ids = knownIslandDocs.map(i => i.islandId);
+          const sandCells = await Cell.find({
+            gameId: GAME_ID,
+            type: 'SAND',
+            'island.id': { $in: ids }
+          });
+          sandCells.forEach(c => {
+            this.rechargePoints.push({ x: c.x, y: c.y });
+          });
+        }
+      }
+
+      // Strategy 3: Fallback - use ALL SAND cells in DB (any island is better than none)
+      if (this.rechargePoints.length === 0) {
+        const allSand = await Cell.find({ gameId: GAME_ID, type: 'SAND' });
+        allSand.forEach(c => {
+          this.rechargePoints.push({ x: c.x, y: c.y });
+        });
+      }
+
+      this.log(`Loaded ${this.rechargePoints.length} recharge points from DB`);
+    } catch (err) {
+      this.log(`Failed to load recharge points: ${err.message}`, 'error');
+    }
+  }
+
+  // ========================
+  // INITIALIZATION
+  // ========================
   async initialize() {
     this.log('Initializing bot...');
 
+    // 1. Get player details from game API
     const details = await this.getPlayerDetails();
 
     if (!details.ship) {
@@ -258,81 +310,94 @@ class ExplorerBot {
       return false;
     }
 
-    this.position = details.ship.currentPosition;
-    this.energy = details.ship.availableMove;
-    this.maxEnergy = details.ship.level?.maxMovement || 15;
-    this.speed = details.ship.level?.speed || 5000;
+    // Ship stats (no position in player details!)
+    this.energy = details.ship.availableMove ?? 0;
+    this.maxEnergy = details.ship.level?.maxMovement || 100;
+    this.speed = details.ship.level?.speed || 800;
     this.visibilityRange = details.ship.level?.visibilityRange || 1;
-    this.startPosition = { ...this.position };
 
-    // Collect home island cells
-    this.homeIslandCells = [];
-    if (details.home?.cells) {
-      details.home.cells.forEach(c => {
-        this.homeIslandCells.push({ x: c.x, y: c.y });
-      });
-    }
-    // If no home cells found, use nearby SAND cells from DB
-    if (this.homeIslandCells.length === 0) {
-      try {
-        const homeCells = await Cell.find({
-          gameId: GAME_ID,
-          type: 'SAND',
-          x: { $gte: this.position.x - 5, $lte: this.position.x + 5 },
-          y: { $gte: this.position.y - 5, $lte: this.position.y + 5 }
-        });
-        homeCells.forEach(c => this.homeIslandCells.push({ x: c.x, y: c.y }));
-      } catch (err) {
-        console.error('Failed to load home cells from DB:', err.message);
-      }
-    }
-    // Fallback: use start position
-    if (this.homeIslandCells.length === 0) {
-      this.homeIslandCells.push({ ...this.position });
-    }
+    // Home island name
+    this.homeIslandName = details.home?.name || null;
 
-    // Collect known island cells (validated discoveries)
-    this.knownIslandCells = [];
+    // Known island names from API
+    this.knownIslandNames = new Set();
     if (details.discoveredIslands) {
       for (const { island, islandState } of details.discoveredIslands) {
         if (islandState === 'KNOWN') {
-          // Try to find island cells from DB
-          try {
-            const islandCells = await Cell.find({
-              gameId: GAME_ID,
-              'island.id': island.id,
-              type: 'SAND'
-            });
-            islandCells.forEach(c => {
-              this.knownIslandCells.push({ x: c.x, y: c.y });
-            });
-          } catch (err) {
-            // Ignore
-          }
+          this.knownIslandNames.add(island.name);
         }
       }
     }
 
-    // Load visited positions from DB
+    // 2. Load position from MongoDB (player details doesn't have it)
+    try {
+      const savedPos = await ShipPosition.findOne({ gameId: GAME_ID });
+      if (savedPos) {
+        this.position = { x: savedPos.x, y: savedPos.y, type: savedPos.type, zone: savedPos.zone };
+        this.log(`Position loaded from DB: (${this.position.x}, ${this.position.y})`);
+      }
+    } catch (err) {
+      this.log(`Failed to load position from DB: ${err.message}`, 'warn');
+    }
+
+    // 3. If no position, do an initial move to discover our position
+    if (!this.position) {
+      this.log('No position in DB. Making initial move to discover position...');
+      if (this.energy <= 0) {
+        this.log('No energy to make initial move! Wait for recharge.', 'error');
+        return false;
+      }
+      try {
+        const moveResult = await this.moveShip('N');
+        this.position = { x: moveResult.position.x, y: moveResult.position.y, type: moveResult.position.type, zone: moveResult.position.zone };
+        this.energy = moveResult.energy;
+        this.moveCount++;
+        await this.savePositionToDB(this.position);
+        if (moveResult.discoveredCells) {
+          await this.saveCellsToDB(moveResult.discoveredCells);
+        }
+        this.log(`Initial move done. Position: (${this.position.x}, ${this.position.y}), Energy: ${this.energy}`);
+      } catch (err) {
+        this.log(`Initial move failed: ${err.message}`, 'error');
+        return false;
+      }
+    }
+
+    // 4. Sync island states: mark DB islands as KNOWN if the API says so
+    try {
+      const dbIslands = await Island.find({ gameId: GAME_ID });
+      for (const dbIsland of dbIslands) {
+        if (this.knownIslandNames.has(dbIsland.name) && dbIsland.state !== 'KNOWN') {
+          dbIsland.state = 'KNOWN';
+          await dbIsland.save();
+          this.log(`Island "${dbIsland.name}" synced to KNOWN`);
+        }
+      }
+    } catch (err) {
+      // non-critical
+    }
+
+    // 5. Load recharge points from DB
+    await this.loadRechargePoints();
+
+    // 6. Load visited positions
     try {
       const allCells = await Cell.find({ gameId: GAME_ID }, { x: 1, y: 1 });
       allCells.forEach(c => this.visitedPositions.add(`${c.x},${c.y}`));
-    } catch (err) {
-      // Ignore
-    }
+    } catch (err) { /* ignore */ }
 
     this.resetSpiral();
 
-    this.log(`Position: (${this.position.x}, ${this.position.y})`);
-    this.log(`Energy: ${this.energy}/${this.maxEnergy}`);
-    this.log(`Ship speed: ${this.speed}ms, Visibility: ${this.visibilityRange}`);
-    this.log(`Home cells: ${this.homeIslandCells.length}, Known island cells: ${this.knownIslandCells.length}`);
-    this.log(`Already visited: ${this.visitedPositions.size} positions`);
+    this.log(`Energy: ${this.energy}/${this.maxEnergy}, Speed: ${this.speed}ms, Visibility: ${this.visibilityRange}`);
+    this.log(`Known islands: ${this.knownIslandNames.size}, Recharge points: ${this.rechargePoints.length}`);
+    this.log(`Already visited: ${this.visitedPositions.size} cells`);
 
     return true;
   }
 
-  // --- Main Loop ---
+  // ========================
+  // MAIN LOOP
+  // ========================
   async tick() {
     if (!this.running || this.paused) return;
 
@@ -347,40 +412,44 @@ class ExplorerBot {
         case 'RECHARGING':
           await this.handleRecharging();
           break;
-        default:
-          break;
       }
     } catch (err) {
       this.log(`Error: ${err.message}`, 'error');
 
-      // Handle specific errors
       const msg = err.message.toLowerCase();
       if (msg.includes('immobili') || msg.includes('panne') || msg.includes('rescue') || msg.includes('remorqu')) {
-        this.log('Ship is immobilized! Waiting for rescue...', 'warn');
+        this.log('Ship immobilized! Waiting for rescue...', 'warn');
         this.state = 'RECHARGING';
-      } else if (msg.includes('cooldown') || msg.includes('attendre') || msg.includes('wait')) {
-        this.log('Cooldown active, waiting...', 'warn');
-        // Will retry on next tick
+      } else if (msg.includes('too_fast') || msg.includes('trop rapide')) {
+        // Just wait, next tick will handle it
       } else if (msg.includes('401') || msg.includes('403')) {
-        this.log('Authentication error! Stopping bot.', 'error');
+        this.log('Auth error! Stopping.', 'error');
         this.stop();
         return;
       }
     }
 
     if (this.running && !this.paused) {
-      const delay = this.state === 'RECHARGING' ? this.speed * 2 : this.speed + 500;
+      const delay = this.state === 'RECHARGING' ? 5000 : this.speed + 300;
       this.timer = setTimeout(() => this.tick(), delay);
     }
   }
 
   async handleExploring() {
     if (!this.canSafelyExplore()) {
-      this.state = 'RETURNING';
-      const nearest = this.findNearestRechargePoint();
-      const dist = nearest ? this.chebyshev(this.position, nearest) : '?';
-      this.log(`Energy low (${this.energy}), returning to recharge. Distance: ${dist}`, 'warn');
-      return this.handleReturning();
+      const target = this.findNearestRechargePoint();
+      if (target && this.chebyshev(this.position, target) <= this.energy) {
+        // Recharge point reachable - go there
+        this.state = 'RETURNING';
+        this.log(`Energy low (${this.energy}), returning to recharge (dist: ${this.chebyshev(this.position, target)})`, 'warn');
+        return;
+      }
+      // Recharge point too far or none - keep exploring, game will tow us when at 0
+      if (this.energy <= 0) {
+        this.state = 'RECHARGING';
+        this.log('No energy! Waiting for tow...', 'warn');
+        return;
+      }
     }
 
     const direction = this.getNextSpiralDirection();
@@ -388,28 +457,34 @@ class ExplorerBot {
   }
 
   async handleReturning() {
+    if (!this.position) {
+      this.log('Position unknown, cannot return!', 'error');
+      this.stop();
+      return;
+    }
+
     const target = this.findNearestRechargePoint();
     if (!target) {
-      this.log('No recharge point found! Stopping.', 'error');
-      this.stop();
+      this.log('No recharge point. Waiting for tow...', 'warn');
+      this.state = 'RECHARGING';
       return;
     }
 
     const dist = this.chebyshev(this.position, target);
 
-    // Check if we're on or very near the island
-    if (dist <= 1 && this.position.type === 'SAND') {
-      this.state = 'RECHARGING';
-      this.log(`On island cell at (${this.position.x}, ${this.position.y}). Validating discoveries and recharging...`);
-      // Fetch details to trigger validation
-      await this.refreshState();
-      return;
-    }
-
-    if (dist === 0) {
-      this.state = 'RECHARGING';
-      this.log('At recharge point. Recharging...');
-      await this.refreshState();
+    // Arrived at or very near recharge point
+    if (dist <= 1) {
+      if (this.position.type === 'SAND') {
+        this.state = 'RECHARGING';
+        this.log(`Arrived on island at (${this.position.x}, ${this.position.y}). Recharging...`, 'success');
+        return;
+      }
+      const direction = this.directionToward(target);
+      await this.doMove(direction);
+      if (this.position && this.position.type === 'SAND') {
+        this.state = 'RECHARGING';
+        this.log(`Docked on island. Recharging...`, 'success');
+      }
       return;
     }
 
@@ -418,7 +493,45 @@ class ExplorerBot {
   }
 
   async handleRecharging() {
-    await this.refreshState();
+    // Poll player details to check energy
+    try {
+      const details = await this.getPlayerDetails();
+      const oldEnergy = this.energy;
+      this.energy = details.ship.availableMove ?? this.energy;
+      this.maxEnergy = details.ship.level?.maxMovement || this.maxEnergy;
+
+      // If energy jumped to full, ship was likely towed back to home
+      if (oldEnergy <= 0 && this.energy >= this.maxEnergy * 0.5) {
+        this.log('Energy restored! Ship was likely towed. Resetting position...', 'warn');
+        // Make a move to get new position
+        try {
+          const moveResult = await this.moveShip('N');
+          this.position = {
+            x: moveResult.position.x, y: moveResult.position.y,
+            type: moveResult.position.type, zone: moveResult.position.zone
+          };
+          this.energy = moveResult.energy;
+          this.moveCount++;
+          await this.savePositionToDB(this.position);
+          if (moveResult.discoveredCells) {
+            await this.saveCellsToDB(moveResult.discoveredCells);
+            for (const cell of moveResult.discoveredCells) {
+              if (cell.island && this.knownIslandNames.has(cell.island.name)) {
+                this.rechargePoints.push({ x: cell.x, y: cell.y });
+              }
+            }
+          }
+          this.log(`New position after tow: (${this.position.x}, ${this.position.y})`, 'success');
+        } catch (err) {
+          this.log(`Post-tow move failed: ${err.message}`, 'warn');
+        }
+      }
+    } catch (err) {
+      this.log(`Failed to refresh details: ${err.message}`, 'warn');
+    }
+
+    // Reload recharge points in case new islands were validated
+    await this.loadRechargePoints();
 
     if (this.energy >= this.maxEnergy * 0.8) {
       this.state = 'EXPLORING';
@@ -429,44 +542,16 @@ class ExplorerBot {
     }
   }
 
-  async refreshState() {
-    const details = await this.getPlayerDetails();
-    this.energy = details.ship.availableMove;
-    this.maxEnergy = details.ship.level?.maxMovement || this.maxEnergy;
-    this.position = details.ship.currentPosition || this.position;
-
-    // Update known islands from validated discoveries
-    if (details.discoveredIslands) {
-      for (const { island, islandState } of details.discoveredIslands) {
-        if (islandState === 'KNOWN') {
-          try {
-            const islandCells = await Cell.find({
-              gameId: GAME_ID,
-              'island.id': island.id,
-              type: 'SAND'
-            });
-            for (const c of islandCells) {
-              const key = `${c.x},${c.y}`;
-              if (!this.knownIslandCells.find(k => `${k.x},${k.y}` === key)) {
-                this.knownIslandCells.push({ x: c.x, y: c.y });
-              }
-            }
-            // Update island state in DB
-            await Island.findOneAndUpdate(
-              { gameId: GAME_ID, islandId: island.id },
-              { $set: { state: 'KNOWN' } }
-            );
-          } catch (err) { /* ignore */ }
-        }
-      }
+  // ========================
+  // DO MOVE
+  // ========================
+  async doMove(direction) {
+    if (!this.position) {
+      this.log('Cannot move: position unknown', 'error');
+      return null;
     }
 
-    // Broadcast status update
-    broadcast('bot:status', this.getStatus());
-  }
-
-  async doMove(direction) {
-    const fromPosition = { ...this.position };
+    const fromPosition = { x: this.position.x, y: this.position.y, type: this.position.type, zone: this.position.zone };
     const energyBefore = this.energy;
 
     this.log(`Moving ${direction} from (${this.position.x}, ${this.position.y}) [energy: ${this.energy}]`);
@@ -474,79 +559,91 @@ class ExplorerBot {
     const result = await this.moveShip(direction);
     this.moveCount++;
 
-    this.position = result.position;
+    // Update position
+    this.position = {
+      x: result.position.x,
+      y: result.position.y,
+      type: result.position.type,
+      zone: result.position.zone
+    };
     this.energy = result.energy;
-    this.visitedPositions.add(`${result.position.x},${result.position.y}`);
+    this.visitedPositions.add(`${this.position.x},${this.position.y}`);
+
+    // Save position to DB
+    this.savePositionToDB(this.position);
 
     // Process discovered cells
-    if (result.discoveredCells && result.discoveredCells.length > 0) {
-      this.discoveredCellsCount += result.discoveredCells.length;
+    const cells = result.discoveredCells || [];
+    this.discoveredCellsCount += cells.length;
 
-      // Check for island discoveries
-      for (const cell of result.discoveredCells) {
-        this.visitedPositions.add(`${cell.x},${cell.y}`);
-        if (cell.island) {
-          this.islandsFound++;
-          this.log(`Island discovered: "${cell.island.name}" at (${cell.x}, ${cell.y})!`, 'success');
-          await this.saveIslandToDB(cell.island);
+    for (const cell of cells) {
+      this.visitedPositions.add(`${cell.x},${cell.y}`);
+      if (cell.island) {
+        const isNew = !this.islandsFound.has(cell.island.name);
+        this.islandsFound.add(cell.island.name);
+        if (isNew) {
+          const isKnown = this.knownIslandNames.has(cell.island.name);
+          this.log(`Island ${isKnown ? 'reconnue' : 'decouverte'}: "${cell.island.name}" at (${cell.x}, ${cell.y})!`, 'success');
+          this.saveIslandToDB(cell.island);
+        }
+
+        // If this island is already KNOWN, add its cells as recharge points
+        if (this.knownIslandNames.has(cell.island.name)) {
+          if (!this.rechargePoints.find(r => r.x === cell.x && r.y === cell.y)) {
+            this.rechargePoints.push({ x: cell.x, y: cell.y });
+          }
         }
       }
-
-      // Save cells to DB (async, don't wait)
-      this.saveCellsToDB(result.discoveredCells);
-
-      // Broadcast cell updates for live map
-      broadcast('cells:update', { cells: result.discoveredCells });
     }
 
-    // Save move to DB
-    this.saveMoveToDB(
-      direction, fromPosition, result.position,
-      energyBefore, result.energy,
-      result.discoveredCells?.length || 0
-    );
+    // Save cells to DB (fire and forget)
+    this.saveCellsToDB(cells);
 
-    // Broadcast position update
-    broadcast('ship:position', { position: result.position });
+    // Save move to DB (fire and forget)
+    this.saveMoveToDB(direction, fromPosition, this.position, energyBefore, this.energy, cells.length);
+
+    // Broadcast updates
+    broadcast('cells:update', { cells });
+    broadcast('ship:position', { position: this.position });
     broadcast('bot:status', this.getStatus());
 
     return result;
   }
 
-  // --- Control ---
+  // ========================
+  // CONTROL
+  // ========================
   async start() {
     if (this.running) {
-      return { success: false, message: 'Bot is already running' };
+      return { success: false, message: 'Bot already running' };
     }
 
     try {
       const initialized = await this.initialize();
       if (!initialized) {
-        return { success: false, message: 'Failed to initialize bot' };
+        return { success: false, message: 'Failed to initialize' };
       }
 
       this.running = true;
       this.paused = false;
       this.startTime = new Date().toISOString();
 
-      // Determine initial state based on energy
-      if (this.energy > SAFETY_BUFFER + this.distanceToNearestRecharge()) {
-        this.state = 'EXPLORING';
-      } else if (this.energy === 0) {
+      // Determine initial state
+      if (this.energy <= 0) {
         this.state = 'RECHARGING';
-      } else {
+      } else if (!this.canSafelyExplore()) {
         this.state = 'RETURNING';
+      } else {
+        this.state = 'EXPLORING';
       }
 
       this.log(`Bot started in ${this.state} mode`, 'success');
       broadcast('bot:status', this.getStatus());
 
-      // Start the main loop
       this.timer = setTimeout(() => this.tick(), 1000);
-
-      return { success: true, message: `Bot started in ${this.state} mode` };
+      return { success: true, message: `Bot started (${this.state})` };
     } catch (err) {
-      this.log(`Failed to start: ${err.message}`, 'error');
+      this.log(`Start failed: ${err.message}`, 'error');
       return { success: false, message: err.message };
     }
   }
@@ -565,7 +662,7 @@ class ExplorerBot {
   }
 
   pause() {
-    if (!this.running) return { success: false, message: 'Bot is not running' };
+    if (!this.running) return { success: false, message: 'Not running' };
     this.paused = true;
     this.log('Bot paused');
     broadcast('bot:status', this.getStatus());
@@ -573,15 +670,12 @@ class ExplorerBot {
   }
 
   resume() {
-    if (!this.running) return { success: false, message: 'Bot is not running' };
-    if (!this.paused) return { success: false, message: 'Bot is not paused' };
+    if (!this.running) return { success: false, message: 'Not running' };
+    if (!this.paused) return { success: false, message: 'Not paused' };
     this.paused = false;
     this.log('Bot resumed');
     broadcast('bot:status', this.getStatus());
-
-    // Restart tick loop
     this.timer = setTimeout(() => this.tick(), 1000);
-
     return { success: true, message: 'Bot resumed' };
   }
 
@@ -597,8 +691,8 @@ class ExplorerBot {
       visibilityRange: this.visibilityRange,
       moveCount: this.moveCount,
       cellsDiscovered: this.discoveredCellsCount,
-      islandsFound: this.islandsFound,
-      knownRechargePoints: this.homeIslandCells.length + this.knownIslandCells.length,
+      islandsFound: this.islandsFound.size,
+      knownRechargePoints: this.rechargePoints.length,
       visitedPositions: this.visitedPositions.size,
       startTime: this.startTime,
       uptime: this.startTime ? Date.now() - new Date(this.startTime).getTime() : 0
@@ -614,6 +708,5 @@ class ExplorerBot {
   }
 }
 
-// Singleton instance
 const bot = new ExplorerBot();
 export default bot;
