@@ -25,7 +25,7 @@ class SmartExplorer:
 
         # État du bot
         self.running = False
-        self.state = "IDLE"  # IDLE, EXPLORING, RETURNING, RECHARGING
+        self.state = "IDLE"  # IDLE, EXPLORING, RETURNING, RECHARGING, RESCUE
 
         # Position et énergie
         self.position: Optional[dict] = None
@@ -258,6 +258,39 @@ class SmartExplorer:
         """Vérifie si on doit retourner à la base"""
         return not self.can_safely_explore()
 
+    def _check_island_is_known(self, island_name: str) -> bool:
+        """Vérifie via l'API si une île est KNOWN (pas juste DISCOVERED)"""
+        try:
+            details = self.api.get_player_details()
+            for disc in details.get("discoveredIslands", []):
+                if disc.get("island", {}).get("name") == island_name:
+                    return disc.get("islandState") == "KNOWN"
+            return False
+        except Exception as e:
+            self.log(f"Erreur vérification île: {e}", "warn")
+            return False
+
+    def refresh_known_islands(self):
+        """Rafraîchit la liste des îles KNOWN depuis l'API"""
+        try:
+            details = self.api.get_player_details()
+            old_count = len(self.known_island_names)
+
+            for disc in details.get("discoveredIslands", []):
+                if disc.get("islandState") == "KNOWN":
+                    island_name = disc.get("island", {}).get("name")
+                    if island_name and island_name not in self.known_island_names:
+                        self.known_island_names.add(island_name)
+                        self.log(f"Île validée: {island_name}", "success")
+
+            # Recharger les bases si de nouvelles îles KNOWN
+            if len(self.known_island_names) > old_count:
+                self.known_bases = self.db.load_known_bases()
+                self.log(f"Bases de recharge mises à jour: {len(self.known_bases)}")
+
+        except Exception as e:
+            self.log(f"Erreur rafraîchissement îles: {e}", "warn")
+
     # ========================
     # INITIALISATION
     # ========================
@@ -377,16 +410,23 @@ class SmartExplorer:
                     island_name = island.get("name")
                     if island_name and island_name not in self.islands_found:
                         self.islands_found.add(island_name)
-                        is_known = island_name in self.known_island_names
-                        status = "KNOWN" if is_known else "DISCOVERED"
-                        self.log(f"Île {status}: {island_name}", "success")
                         self.db.save_island(island)
 
-                        # Si l'île est KNOWN, ajouter ses cellules SAND comme bases
-                        if is_known and cell.get("type") == "SAND":
-                            base = (cell["x"], cell["y"])
-                            if base not in self.known_bases:
-                                self.known_bases.append(base)
+                        # Vérifier le statut KNOWN via l'API (pas le cache local)
+                        is_known = self._check_island_is_known(island_name)
+                        status = "KNOWN" if is_known else "DISCOVERED"
+                        self.log(f"Île {status}: {island_name}", "success")
+
+                        # Mettre à jour le cache local si KNOWN
+                        if is_known:
+                            self.known_island_names.add(island_name)
+
+                    # Ajouter les cellules SAND des îles KNOWN comme bases
+                    if cell.get("type") == "SAND" and island_name in self.known_island_names:
+                        base = (cell["x"], cell["y"])
+                        if base not in self.known_bases:
+                            self.known_bases.append(base)
+                            self.log(f"Nouvelle base de recharge: ({cell['x']}, {cell['y']})", "info")
 
             # Mettre à jour la frontière
             self.update_frontier(cells)
@@ -491,16 +531,23 @@ class SmartExplorer:
             self.energy = details["ship"].get("availableMove", self.energy)
             self.max_energy = details["ship"].get("level", {}).get("maxMovement", self.max_energy)
 
-            # Mettre à jour les îles KNOWN
+            # Mettre à jour les îles KNOWN depuis l'API
+            old_known_count = len(self.known_island_names)
             for disc in details.get("discoveredIslands", []):
                 if disc.get("islandState") == "KNOWN":
                     island_name = disc.get("island", {}).get("name")
                     if island_name and island_name not in self.known_island_names:
                         self.known_island_names.add(island_name)
                         self.log(f"Nouvelle île validée: {island_name}", "success")
+                        # Synchroniser en DB
+                        self.db.sync_known_islands(self.known_island_names)
 
-            # Recharger les bases
-            self.known_bases = self.db.load_known_bases()
+            # Recharger les bases si nouvelles îles KNOWN
+            if len(self.known_island_names) > old_known_count:
+                self.known_bases = self.db.load_known_bases()
+                self.log(f"Bases de recharge mises à jour: {len(self.known_bases)}", "info")
+            elif not self.known_bases:
+                self.known_bases = self.db.load_known_bases()
 
             # Si énergie restaurée subitement (remorquage)
             if old_energy <= 0 and self.energy >= self.max_energy * 0.5:
@@ -527,9 +574,82 @@ class SmartExplorer:
         except Exception as e:
             self.log(f"Erreur recharge: {e}", "warn")
 
+    def handle_rescue(self):
+        """Gère l'état RESCUE (bateau mort - kraken, pirate, etc.)"""
+        try:
+            # 1. Récupérer les taxes en attente
+            taxes = self.api.get_taxes()
+            due_taxes = [t for t in taxes if t.get("state") == "DUE"]
+
+            if not due_taxes:
+                self.log("Aucune taxe à payer, reprise de l'exploration", "success")
+                self.state = "EXPLORING"
+                self.current_target = None
+                return
+
+            # 2. Payer chaque taxe DUE
+            for tax in due_taxes:
+                tax_id = tax.get("id")
+                tax_type = tax.get("type", "UNKNOWN")
+                amount = tax.get("amount", 0)
+
+                self.log(f"Paiement taxe {tax_type} (ID: {tax_id[:8]}...) - {amount} pièces", "warn")
+
+                try:
+                    self.api.pay_tax(tax_id)
+                    self.log(f"Taxe {tax_type} payée!", "success")
+                except Exception as e:
+                    self.log(f"Échec paiement taxe: {e}", "error")
+                    return  # On réessaiera au prochain tick
+
+            # 3. Après paiement, faire un mouvement pour récupérer la position
+            self.log("Taxes payées, récupération de la position...", "info")
+            time.sleep(1)  # Petit délai pour laisser le serveur traiter
+
+            try:
+                result = self.api.move_ship("N")
+                self.position = result["position"]
+                self.energy = result["energy"]
+                self.move_count += 1
+                self.db.save_ship_position(self.position)
+                self.backend.notify_ship_position(self.position)
+
+                if result.get("discoveredCells"):
+                    self.db.save_cells(result["discoveredCells"])
+                    self.update_frontier(result["discoveredCells"])
+                    self.backend.notify_cells(result["discoveredCells"])
+
+                self.log(f"Position récupérée: ({self.position['x']}, {self.position['y']}), Énergie: {self.energy}", "success")
+
+                # Déterminer le nouvel état
+                if self.energy >= self.max_energy * RECHARGE_THRESHOLD:
+                    self.state = "EXPLORING"
+                    self.current_target = None
+                else:
+                    self.state = "RECHARGING"
+
+            except Exception as e:
+                self.log(f"Erreur après paiement: {e}", "error")
+                # Peut-être encore bloqué, on reste en RESCUE
+                time.sleep(2)
+
+        except Exception as e:
+            self.log(f"Erreur rescue: {e}", "error")
+
     # ========================
     # BOUCLE PRINCIPALE
     # ========================
+
+    def _check_for_rescue(self):
+        """Vérifie s'il y a des taxes RESCUE à payer"""
+        try:
+            taxes = self.api.get_taxes()
+            due_taxes = [t for t in taxes if t.get("state") == "DUE"]
+            if due_taxes:
+                self.log(f"Taxes en attente détectées: {len(due_taxes)}", "warn")
+                self.state = "RESCUE"
+        except Exception:
+            pass  # Ignorer les erreurs de vérification
 
     def tick(self):
         """Exécute un tick du bot"""
@@ -540,20 +660,25 @@ class SmartExplorer:
                 self.handle_returning()
             elif self.state == "RECHARGING":
                 self.handle_recharging()
+            elif self.state == "RESCUE":
+                self.handle_rescue()
 
         except Exception as e:
             error_msg = str(e).lower()
 
-            if "immobili" in error_msg or "panne" in error_msg or "rescue" in error_msg:
-                self.log("Bateau immobilisé! Attente remorquage...", "warn")
-                self.state = "RECHARGING"
+            # Détection des erreurs de mort (kraken, pirate, panne, etc.)
+            if any(word in error_msg for word in ["immobili", "panne", "rescue", "kraken", "pirate", "mort", "dead", "sunk"]):
+                self.log(f"Bateau en détresse! Raison: {e}", "warn")
+                self.state = "RESCUE"
             elif "too_fast" in error_msg or "trop rapide" in error_msg:
                 self.log("Trop rapide, attente...", "warn")
             elif "401" in error_msg or "403" in error_msg:
                 self.log("Erreur d'authentification!", "error")
                 self.running = False
             else:
+                # Erreur inconnue - vérifier si c'est une situation de rescue
                 self.log(f"Erreur: {e}", "error")
+                self._check_for_rescue()
 
     def start(self):
         """Démarre le bot"""
