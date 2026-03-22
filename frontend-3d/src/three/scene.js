@@ -155,7 +155,7 @@ export class GameScene {
 
     this.islandManager.setShipPosition(sx, sy, RENDER_RADIUS);
     for (const [, cell] of this.cells) {
-      if (cell.type !== 'SAND' && !cell.island) continue;
+      if (cell.type !== 'SAND') continue;
       const dx = cell.x - sx;
       const dy = cell.y - sy;
       if (dx * dx + dy * dy <= RENDER_RADIUS * RENDER_RADIUS) {
@@ -179,7 +179,7 @@ export class GameScene {
     // Only send nearby SAND cells to island manager
     this.islandManager.setShipPosition(sx, sy, RENDER_RADIUS);
     for (const [, cell] of this.cells) {
-      if (cell.type !== 'SAND' && !cell.island) continue;
+      if (cell.type !== 'SAND') continue;
       const dx = cell.x - sx;
       const dy = cell.y - sy;
       if (dx * dx + dy * dy <= RENDER_RADIUS * RENDER_RADIUS) {
