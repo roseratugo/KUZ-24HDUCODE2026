@@ -3,6 +3,17 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { GameScene } from './three/scene.js';
 import { fetchCells, fetchIslands, fetchShipPosition, connectWebSocket } from './three/api.js';
 import Minimap from './components/Minimap.vue';
+import ShipControls from './components/ShipControls.vue';
+import Compass from './components/Compass.vue';
+import EscapeMenu from './components/EscapeMenu.vue';
+
+const menuVisible = ref(false);
+
+function onGlobalKeydown(e) {
+  if (e.key === 'Escape') {
+    menuVisible.value = !menuVisible.value;
+  }
+}
 
 const canvasContainer = ref(null);
 const shipPos = ref({ x: 0, y: 0 });
@@ -13,6 +24,8 @@ const devMode = ref(false);
 const allCells = ref(new Map());
 
 let gameScene = null;
+const getCamera = () => gameScene?.camera;
+const getTarget = () => gameScene?.controls?.target;
 let disconnectWs = null;
 
 // Demo data for dev mode (no backend)
@@ -65,6 +78,7 @@ function loadDevFallback() {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', onGlobalKeydown);
   gameScene = new GameScene(canvasContainer.value);
 
   // Try loading from backend
@@ -115,7 +129,14 @@ onMounted(async () => {
   }
 });
 
+function onShipMoved(position) {
+  if (!position || !gameScene) return;
+  shipPos.value = { x: position.x, y: position.y };
+  gameScene.updateShipPosition(position);
+}
+
 onUnmounted(() => {
+  window.removeEventListener('keydown', onGlobalKeydown);
   if (disconnectWs) disconnectWs();
   if (gameScene) gameScene.dispose();
 });
@@ -150,5 +171,10 @@ onUnmounted(() => {
     </div>
   </div>
 
+  <div v-if="!menuVisible" class="esc-hint">ESC - Menu</div>
+
+  <ShipControls v-if="!menuVisible" @moved="onShipMoved" />
+  <Compass :getCamera="getCamera" :getTarget="getTarget" />
   <Minimap :cells="allCells" :shipX="shipPos.x" :shipY="shipPos.y" />
+  <EscapeMenu :visible="menuVisible" @close="menuVisible = false" />
 </template>

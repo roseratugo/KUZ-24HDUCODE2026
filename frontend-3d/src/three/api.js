@@ -1,11 +1,21 @@
 import axios from "axios";
 
 const GAME_ID = "kuz-team";
+const CODINGGAME_ID = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjb2RpbmdnYW1lIiwic3ViIjoiZTQ2MmE1ZWItOWQxNi00M2Q2LTg4MTYtMzc2N2MzMzZiZjczIiwicm9sZXMiOlsiVVNFUiJdfQ.i4gq-3ey6r0m1BOQjGTcjhvONZe9UXmPJo8ojcMf-7k";
 
 const client = axios.create({
   baseURL: "/backend-api",
   headers: { "Content-Type": "application/json" },
   timeout: 3000,
+});
+
+const gameClient = axios.create({
+  baseURL: "/api",
+  headers: {
+    "Content-Type": "application/json",
+    "codinggame-id": CODINGGAME_ID,
+  },
+  timeout: 5000,
 });
 
 export async function fetchCells() {
@@ -20,6 +30,53 @@ export async function fetchIslands() {
 
 export async function fetchShipPosition() {
   const res = await client.get(`/ship-position/${GAME_ID}`);
+  return res.data;
+}
+
+export async function moveShip(direction) {
+  const res = await gameClient.post("/ship/move", { direction });
+  return res.data;
+}
+
+export async function fetchPlayerDetails() {
+  const res = await gameClient.get("/players/details");
+  return res.data;
+}
+
+export async function fetchResources() {
+  const res = await gameClient.get("/resources");
+  return res.data;
+}
+
+// Marketplace
+export async function fetchOffers() {
+  const res = await gameClient.get("/marketplace/offers");
+  return res.data;
+}
+
+export async function purchaseOffer(offerId, quantity) {
+  const res = await gameClient.post("/marketplace/purchases", { offerId, quantity });
+  return res.data;
+}
+
+export async function createOffer(resourceType, quantity, unitPrice) {
+  const res = await gameClient.post("/marketplace/offers", { resourceType, quantity, unitPrice });
+  return res.data;
+}
+
+export async function deleteOffer(offerId) {
+  const res = await gameClient.delete(`/marketplace/offers/${offerId}`);
+  return res.data;
+}
+
+// Thefts
+export async function fetchThefts() {
+  const res = await gameClient.get("/thefts");
+  return res.data;
+}
+
+export async function launchTheft(resourceType, moneySpent) {
+  const res = await gameClient.post("/thefts/player", { resourceType, moneySpent });
   return res.data;
 }
 
