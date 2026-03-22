@@ -372,7 +372,12 @@ export class GameScene {
       );
       const distToTarget = toTarget.length();
 
-      // --- Heading: face direction of target ---
+      // Smooth movement toward target
+      const lerpSpeed = 1 - Math.pow(0.005, delta);
+      this.boat.position.x += (this.smoothedTarget.x - this.boat.position.x) * lerpSpeed;
+      this.boat.position.z += (this.smoothedTarget.z - this.boat.position.z) * lerpSpeed;
+
+      // Heading: face direction of movement
       if (distToTarget > 0.5) {
         this.targetHeading = Math.atan2(toTarget.x, toTarget.z);
       }
@@ -383,17 +388,8 @@ export class GameScene {
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
-      // Move FORWARD along the boat's heading, not directly toward target
-      if (distToTarget > 0.5) {
-        const moveSpeed = Math.min(distToTarget, 30) * delta * 2;
-        const alignment = Math.cos(headingDiff);
-        const forwardFactor = Math.max(0, alignment);
-        this.boat.position.x += Math.sin(this.boatHeading) * moveSpeed * forwardFactor;
-        this.boat.position.z += Math.cos(this.boatHeading) * moveSpeed * forwardFactor;
-      }
-
-      // Apply rotation (+90 offset for model orientation)
-      this.boat.rotation.y = this.boatHeading + Math.PI / 2;
+      // Apply rotation (offset for Vogue Merry model orientation)
+      this.boat.rotation.y = this.boatHeading - Math.PI / 2;
 
       // Roll into turns
       const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
