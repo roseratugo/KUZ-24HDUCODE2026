@@ -90,17 +90,21 @@ export class GameScene {
     directionalLight.position.set(50, 100, 50);
     this.scene.add(directionalLight);
 
-    // Ship physics
-    this.targetBoatPos = new THREE.Vector3(0, 9, 0);
-    this.boatVelocity = new THREE.Vector3(0, 0, 0);
-    this.boatHeading = 0; // current facing angle
-    this.targetHeading = 0; // desired angle
-    this.boatSpeed = 0; // current scalar speed
-    this.prevTargetPos = new THREE.Vector3(0, 9, 0);
+    // Ship physics — smooth interpolation between server updates
+    this.targetBoatPos = new THREE.Vector3(0, 9, 0);   // current server target
+    this.prevTargetPos = new THREE.Vector3(0, 9, 0);    // previous server target
+    this.smoothedTarget = new THREE.Vector3(0, 9, 0);   // interpolated target (what we actually chase)
+    this.boatVelocity = new THREE.Vector3(0, 0, 0);     // estimated velocity from server updates
+    this.boatHeading = 0;
+    this.targetHeading = 0;
+    this.lastUpdateTime = 0;       // timestamp of last server update
+    this.updateInterval = 0.2;     // estimated interval between server updates (seconds)
+    this.interpProgress = 1;       // 0..1 progress between prev and current target
 
     // Pre-allocated vectors for animate() to avoid per-frame GC
     this._toTarget = new THREE.Vector3();
     this._scenePos = new THREE.Vector3();
+    this._predicted = new THREE.Vector3();
 
     // Islands
     this.islandManager = new IslandManager(this.scene, this.CELL_SIZE);
@@ -146,9 +150,37 @@ export class GameScene {
     const moved = pos.x !== this.shipPosition.x || pos.y !== this.shipPosition.y;
     this.shipPosition = pos;
     const scenePos = this.worldToScene(pos.x, pos.y);
-    this.targetBoatPos.set(scenePos.x, 9, scenePos.z);
 
-    // Refresh nearby islands when ship moves
+    const now = performance.now() / 1000;
+
+    // Save previous target before overwriting
+    this.prevTargetPos.copy(this.targetBoatPos);
+
+    // Estimate update interval from actual timing
+    if (this.lastUpdateTime > 0) {
+      const dt = now - this.lastUpdateTime;
+      if (dt > 0.01 && dt < 2) {
+        // Smooth the interval estimate
+        this.updateInterval = this.updateInterval * 0.7 + dt * 0.3;
+      }
+    }
+    this.lastUpdateTime = now;
+
+    // Compute velocity from position delta
+    if (moved) {
+      this.boatVelocity.set(
+        (scenePos.x - this.prevTargetPos.x) / this.updateInterval,
+        0,
+        (scenePos.z - this.prevTargetPos.z) / this.updateInterval
+      );
+    } else {
+      this.boatVelocity.set(0, 0, 0);
+    }
+
+    // Set the new target and reset interpolation progress
+    this.targetBoatPos.set(scenePos.x, 9, scenePos.z);
+    this.interpProgress = 0;
+
     if (moved) {
       this.refreshNearbyIslands();
     }
@@ -209,21 +241,37 @@ export class GameScene {
     this.water.material.uniforms['time'].value = time;
 
     if (this.boat) {
-      // Direction to target (flat, no Y) — reuse pre-allocated vector
+      // --- Smooth target interpolation between server updates ---
+      // Advance interpolation progress based on expected update interval
+      this.interpProgress = Math.min(1, this.interpProgress + delta / this.updateInterval);
+
+      // Smoothstep easing for natural acceleration/deceleration
+      const t = this.interpProgress;
+      const ease = t * t * (3 - 2 * t);
+
+      // Interpolate between previous and current target
+      this.smoothedTarget.lerpVectors(this.prevTargetPos, this.targetBoatPos, ease);
+
+      // Add velocity-based prediction to overshoot slightly for fluid motion
+      const prediction = Math.max(0, (t - 0.5) * 0.3); // gentle extrapolation in 2nd half
+      this._predicted.copy(this.boatVelocity).multiplyScalar(prediction * this.updateInterval);
+      this.smoothedTarget.add(this._predicted);
+      this.smoothedTarget.y = 9; // keep Y locked
+
+      // --- Position: smooth chase toward the interpolated target ---
       const toTarget = this._toTarget.set(
-        this.targetBoatPos.x - this.boat.position.x,
+        this.smoothedTarget.x - this.boat.position.x,
         0,
-        this.targetBoatPos.z - this.boat.position.z
+        this.smoothedTarget.z - this.boat.position.z
       );
       const distToTarget = toTarget.length();
 
-      // Smooth movement: lerp position directly toward target
-      const lerpSpeed = 1 - Math.pow(0.02, delta); // smooth ~2s to arrive
-      this.boat.position.x += (this.targetBoatPos.x - this.boat.position.x) * lerpSpeed;
-      this.boat.position.z += (this.targetBoatPos.z - this.boat.position.z) * lerpSpeed;
+      const lerpSpeed = 1 - Math.pow(0.005, delta); // smoother ~3s convergence
+      this.boat.position.x += (this.smoothedTarget.x - this.boat.position.x) * lerpSpeed;
+      this.boat.position.z += (this.smoothedTarget.z - this.boat.position.z) * lerpSpeed;
 
-      // Heading: face direction of movement
-      if (distToTarget > 1) {
+      // --- Heading: face direction of movement ---
+      if (distToTarget > 0.5) {
         this.targetHeading = Math.atan2(toTarget.x, toTarget.z);
       }
 
@@ -231,17 +279,17 @@ export class GameScene {
       let headingDiff = this.targetHeading - this.boatHeading;
       while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
-      this.boatHeading += headingDiff * Math.min(1, 2.0 * delta);
+      this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
       // Apply rotation (+90 offset for model orientation)
       this.boat.rotation.y = this.boatHeading + Math.PI / 2;
 
       // Roll into turns
-      const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.3, -0.1, 0.1);
-      this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, targetRoll, 1 - Math.pow(0.01, delta));
+      const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
+      this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, targetRoll, 1 - Math.pow(0.005, delta));
 
       // Pitch: slight nose-up when moving
-      const speed = distToTarget > 1 ? 1 : distToTarget;
+      const speed = Math.min(1, distToTarget);
       const targetPitch = -speed * 0.03 + Math.sin(time * 1.2) * 0.015;
       this.boat.rotation.x = THREE.MathUtils.lerp(this.boat.rotation.x, targetPitch, 1 - Math.pow(0.05, delta));
 
@@ -252,8 +300,8 @@ export class GameScene {
       this.water.position.x = this.boat.position.x;
       this.water.position.z = this.boat.position.z;
 
-      // Camera follow
-      const camSpeed = 1 - Math.pow(0.1, delta);
+      // Camera follow — smoother
+      const camSpeed = 1 - Math.pow(0.05, delta);
       this.controls.target.lerp(this.boat.position, camSpeed);
     }
 
