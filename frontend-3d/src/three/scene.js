@@ -248,6 +248,10 @@ export class GameScene {
       // Bobbing
       this.boat.position.y = 9 + Math.sin(time * 1.5) * 0.3 + Math.sin(time * 2.3) * 0.1;
 
+      // Water follows the boat so it's always visible
+      this.water.position.x = this.boat.position.x;
+      this.water.position.z = this.boat.position.z;
+
       // Camera follow
       const camSpeed = 1 - Math.pow(0.1, delta);
       this.controls.target.lerp(this.boat.position, camSpeed);
