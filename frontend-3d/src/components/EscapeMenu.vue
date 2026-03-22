@@ -165,6 +165,7 @@ function connectBroker() {
           if (ev) {
             brokerMessages.value.unshift({ id: Date.now(), type: ev.type, data: ev.message, timestamp: new Date().toISOString() });
             if (brokerMessages.value.length > 100) brokerMessages.value = brokerMessages.value.slice(0, 100);
+            handleMarketplaceBrokerEvent(ev.type, ev.message);
           }
         }
       } catch (e) { /* ignore */ }
@@ -186,6 +187,37 @@ function disconnectBroker() {
   if (brokerWs.value) { brokerWs.value.close(); brokerWs.value = null; }
 }
 function toggleBrokerMsg(msg) { msg.expanded = !msg.expanded; }
+
+// Marketplace live updates via broker
+function handleMarketplaceBrokerEvent(eventType, data) {
+  if (!data) return;
+  if (eventType === 'OFFRE') {
+    const normalized = {
+      id: data.id,
+      resourceType: data.resourceType,
+      quantity: data.quantityIn || data.quantity || 0,
+      quantityIn: data.quantityIn || data.quantity || 0,
+      unitPrice: data.pricePerResource || data.unitPrice || 0,
+      pricePerResource: data.pricePerResource || data.unitPrice || 0,
+      owner: data.owner
+    };
+    const idx = offers.value.findIndex(o => o.id === data.id);
+    if (idx >= 0) {
+      offers.value[idx] = { ...offers.value[idx], ...normalized };
+    } else {
+      offers.value.push(normalized);
+    }
+  } else if (eventType === 'ACHAT') {
+    const idx = offers.value.findIndex(o => o.id === data.offerId);
+    if (idx >= 0) {
+      offers.value[idx].quantity = Math.max(0, (offers.value[idx].quantity || 0) - (data.quantity || 0));
+      if (offers.value[idx].quantity <= 0) offers.value.splice(idx, 1);
+    }
+  } else if (eventType === 'OFFRE_SUPPRIMEE') {
+    const idx = offers.value.findIndex(o => o.id === data.id);
+    if (idx >= 0) offers.value.splice(idx, 1);
+  }
+}
 
 const resourceConfig = {
   BOISIUM: { color: '#8B4513', icon: '🪵', label: 'Boisium' },
@@ -245,8 +277,12 @@ async function loadTab(tab) {
 
 watch(activeTab, (tab) => loadTab(tab));
 watch(() => props.visible, (v) => {
-  if (v) loadTab(activeTab.value);
-  else { stopBotPolling(); }
+  if (v) {
+    connectBroker();
+    loadTab(activeTab.value);
+  } else {
+    stopBotPolling();
+  }
 });
 
 onUnmounted(() => { stopBotPolling(); disconnectBroker(); });
