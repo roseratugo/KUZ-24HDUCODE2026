@@ -2,8 +2,8 @@ import { WebSocketServer } from 'ws';
 
 let wss = null;
 
-export function setupWebSocket(server) {
-  wss = new WebSocketServer({ server, path: '/ws' });
+export function setupWebSocket(existingWss) {
+  wss = existingWss;
 
   wss.on('connection', (ws) => {
     console.log('WebSocket client connected');

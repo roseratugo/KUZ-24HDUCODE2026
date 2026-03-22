@@ -30,11 +30,12 @@ mongoose.connect(MONGODB_URI)
   })
   .catch(err => console.error('MongoDB connection error:', err));
 
-// WebSocket server pour le broker
-const wss = new WebSocketServer({ server, path: '/broker' });
+// WebSocket servers (noServer pour gerer le routing manuellement)
+const brokerWss = new WebSocketServer({ noServer: true });
+const movesWss = new WebSocketServer({ noServer: true });
 
-wss.on('connection', (ws) => {
-  console.log('[WebSocket] Nouveau client connecte');
+brokerWss.on('connection', (ws) => {
+  console.log('[WebSocket] Nouveau client broker connecte');
 
   brokerService.addClient(ws);
 
@@ -43,9 +44,26 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('error', (err) => {
-    console.error('[WebSocket] Erreur:', err.message);
+    console.error('[WebSocket] Erreur broker:', err.message);
     brokerService.removeClient(ws);
   });
+});
+
+// Router les connexions WebSocket vers le bon serveur
+server.on('upgrade', (request, socket, head) => {
+  const { pathname } = new URL(request.url, `http://${request.headers.host}`);
+
+  if (pathname === '/broker') {
+    brokerWss.handleUpgrade(request, socket, head, (ws) => {
+      brokerWss.emit('connection', ws, request);
+    });
+  } else if (pathname === '/ws') {
+    movesWss.handleUpgrade(request, socket, head, (ws) => {
+      movesWss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
 });
 
 app.use('/api/cells', cellRoutes);
@@ -82,7 +100,7 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-setupWebSocket(server);
+setupWebSocket(movesWss);
 
 server.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
