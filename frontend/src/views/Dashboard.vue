@@ -1,7 +1,9 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { usePlayerStore } from '../stores/player';
 import { useShipStore } from '../stores/ship';
+import { useBrokerStore } from '../stores/broker';
+import { CREDENTIALS } from '../api/config';
 import PlayerInfo from '../components/PlayerInfo.vue';
 import ResourcesDisplay from '../components/ResourcesDisplay.vue';
 import IslandsDisplay from '../components/IslandsDisplay.vue';
@@ -13,37 +15,44 @@ import ShipUpgradePanel from '../components/ShipUpgradePanel.vue';
 import StorageUpgradePanel from '../components/StorageUpgradePanel.vue';
 import Marketplace from '../components/Marketplace.vue';
 import BotsPanel from '../components/BotsPanel.vue';
+import BrokerPanel from '../components/BrokerPanel.vue';
 
 const playerStore = usePlayerStore();
 const shipStore = useShipStore();
+const brokerStore = useBrokerStore();
+
 const lastRefresh = ref(null);
 const activeTab = ref('map');
 const autoRefreshEnabled = ref(true);
-const countdown = ref(5);
+const countdown = ref(30); // Polling reduit a 30s car broker en temps reel
 
 let autoRefreshInterval = null;
 let countdownInterval = null;
+
+// Status broker
+const brokerConnected = computed(() => brokerStore.isConnected);
 
 const refresh = () => {
   playerStore.refreshAll().then(() => {
     lastRefresh.value = new Date().toLocaleTimeString();
   });
-  countdown.value = 5;
+  countdown.value = 30;
 };
 
 const startAutoRefresh = () => {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
   if (countdownInterval) clearInterval(countdownInterval);
 
+  // Polling reduit a 30 secondes (le broker gere les mises a jour en temps reel)
   autoRefreshInterval = setInterval(() => {
     if (autoRefreshEnabled.value) {
       refresh();
     }
-  }, 5000);
+  }, 30000);
 
   countdownInterval = setInterval(() => {
     if (autoRefreshEnabled.value) {
-      countdown.value = countdown.value > 0 ? countdown.value - 1 : 5;
+      countdown.value = countdown.value > 0 ? countdown.value - 1 : 30;
     }
   }, 1000);
 };
@@ -51,19 +60,29 @@ const startAutoRefresh = () => {
 const toggleAutoRefresh = () => {
   autoRefreshEnabled.value = !autoRefreshEnabled.value;
   if (autoRefreshEnabled.value) {
-    countdown.value = 5;
+    countdown.value = 30;
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
   shipStore.loadPositionFromDB();
-  refresh();
+
+  // Charger les donnees initiales
+  await playerStore.refreshAll();
+  lastRefresh.value = new Date().toLocaleTimeString();
+
+  // Connecter le broker si les donnees joueur sont disponibles
+  if (playerStore.details?.id) {
+    brokerStore.connect(playerStore.details.id, CREDENTIALS.brokerTeamName);
+  }
+
   startAutoRefresh();
 });
 
 onUnmounted(() => {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
   if (countdownInterval) clearInterval(countdownInterval);
+  brokerStore.disconnect();
 });
 </script>
 
@@ -75,292 +94,225 @@ onUnmounted(() => {
         <p class="subtitle">Explorez, commercez, decouvrez le nouveau monde</p>
       </div>
       <div class="header-actions">
-        <div class="auto-refresh-toggle">
-          <button
-            :class="['toggle-btn', { active: autoRefreshEnabled }]"
-            @click="toggleAutoRefresh"
-            :title="autoRefreshEnabled ? 'Desactiver auto-refresh' : 'Activer auto-refresh'"
-          >
-            <span v-if="autoRefreshEnabled">🔄 {{ countdown }}s</span>
-            <span v-else>⏸️ Pause</span>
-          </button>
+        <div :class="['broker-indicator', brokerConnected ? 'connected' : 'disconnected']">
+          {{ brokerConnected ? 'Broker connecte' : 'Broker deconnecte' }}
         </div>
         <span v-if="lastRefresh" class="last-refresh">
-          MaJ: {{ lastRefresh }}
+          Refresh: {{ lastRefresh }}
+          <span v-if="autoRefreshEnabled" class="countdown">({{ countdown }}s)</span>
         </span>
-        <button class="refresh-btn" @click="refresh">↻</button>
+        <button @click="toggleAutoRefresh" :class="['auto-refresh-btn', { active: autoRefreshEnabled }]">
+          {{ autoRefreshEnabled ? 'Auto ON' : 'Auto OFF' }}
+        </button>
+        <button @click="refresh" class="refresh-btn">Refresh</button>
       </div>
     </header>
 
-    <main class="dashboard-content">
-      <div class="tabs">
-        <button
-          :class="['tab', { active: activeTab === 'map' }]"
-          @click="activeTab = 'map'"
-        >
-          Carte & Navigation
-        </button>
-        <button
-          :class="['tab', { active: activeTab === 'ship-upgrade' }]"
-          @click="activeTab = 'ship-upgrade'"
-        >
-          Bateau
-        </button>
-        <button
-          :class="['tab', { active: activeTab === 'storage-upgrade' }]"
-          @click="activeTab = 'storage-upgrade'"
-        >
-          Entrepot
-        </button>
-        <button
-          :class="['tab', { active: activeTab === 'thefts' }]"
-          @click="activeTab = 'thefts'"
-        >
-          Vols
-        </button>
-        <button
-          :class="['tab', { active: activeTab === 'history' }]"
-          @click="activeTab = 'history'"
-        >
-          Historique Requetes
-        </button>
-        <button
-          :class="['tab', { active: activeTab === 'marketplace' }]"
-          @click="activeTab = 'marketplace'"
-        >
-          Marketplace
-        </button>
-        <button
-          :class="['tab', { active: activeTab === 'bots' }]"
-          @click="activeTab = 'bots'"
-        >
-          🤖 Bots
-        </button>
-      </div>
+    <nav class="dashboard-nav">
+      <button 
+        v-for="tab in ['map', 'marketplace', 'thefts', 'upgrades', 'bots', 'broker', 'history']" 
+        :key="tab"
+        :class="['nav-btn', { active: activeTab === tab }]"
+        @click="activeTab = tab"
+      >
+        {{ tab === 'map' ? 'Carte' : 
+           tab === 'marketplace' ? 'Marche' : 
+           tab === 'thefts' ? 'Vols' : 
+           tab === 'upgrades' ? 'Upgrades' : 
+           tab === 'bots' ? 'Bots' :
+           tab === 'broker' ? 'Broker' :
+           'Historique' }}
+      </button>
+    </nav>
 
-      <div :class="['grid-layout', { 'marketplace-mode': activeTab === 'marketplace' || activeTab === 'bots' }]">
-        <div v-show="activeTab !== 'marketplace' && activeTab !== 'bots'" class="col-left">
-          <PlayerInfo />
-          <ResourcesDisplay />
-          <IslandsDisplay />
+    <main class="dashboard-main">
+      <aside class="sidebar">
+        <PlayerInfo />
+        <ResourcesDisplay />
+        <IslandsDisplay />
+        <ShipControl />
+      </aside>
+
+      <section class="content">
+        <WorldMap v-show="activeTab === 'map'" />
+        <Marketplace v-show="activeTab === 'marketplace'" />
+        <TheftsPanel v-show="activeTab === 'thefts'" />
+        <div v-show="activeTab === 'upgrades'" class="upgrades-container">
+          <ShipUpgradePanel />
+          <StorageUpgradePanel />
         </div>
-        <div :class="['col-center', { 'col-full': activeTab === 'marketplace' || activeTab === 'bots' }]">
-          <div v-show="activeTab === 'map'" class="tab-content">
-            <WorldMap />
-          </div>
-          <div v-show="activeTab === 'ship-upgrade'" class="tab-content">
-            <ShipUpgradePanel />
-          </div>
-          <div v-show="activeTab === 'storage-upgrade'" class="tab-content">
-            <StorageUpgradePanel />
-          </div>
-          <div v-show="activeTab === 'thefts'" class="tab-content">
-            <TheftsPanel />
-          </div>
-          <div v-show="activeTab === 'history'" class="tab-content">
-            <RequestHistory />
-          </div>
-          <div v-show="activeTab === 'marketplace'" class="tab-content">
-            <Marketplace />
-          </div>
-          <div v-show="activeTab === 'bots'" class="tab-content">
-            <BotsPanel />
-          </div>
-        </div>
-        <div v-show="activeTab !== 'marketplace' && activeTab !== 'bots'" class="col-right">
-          <ShipControl />
-        </div>
-      </div>
+        <BotsPanel v-show="activeTab === 'bots'" />
+        <BrokerPanel v-show="activeTab === 'broker'" />
+        <RequestHistory v-show="activeTab === 'history'" />
+      </section>
     </main>
-
-    <footer class="dashboard-footer">
-      <p>24h du Code 2026 - Equipe KUZ</p>
-    </footer>
   </div>
 </template>
 
 <style scoped>
 .dashboard {
   min-height: 100vh;
-  background: #0a0a0f;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
   color: #fff;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .dashboard-header {
-  background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
-  padding: 15px 30px;
+  padding: 1rem 2rem;
+  background: rgba(0, 0, 0, 0.3);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 2px solid #e94560;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .header-content h1 {
-  font-size: 1.8rem;
-  color: #e94560;
   margin: 0;
+  font-size: 1.8rem;
+  background: linear-gradient(135deg, #00d4ff, #9b59b6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .subtitle {
-  color: #94a3b8;
-  margin: 3px 0 0;
-  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  opacity: 0.7;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 1rem;
 }
 
-.auto-refresh-toggle .toggle-btn {
-  background: rgba(15, 52, 96, 0.8);
-  border: 1px solid #0f3460;
-  color: #94a3b8;
-  padding: 8px 14px;
+.broker-indicator {
+  padding: 0.4rem 0.8rem;
   border-radius: 20px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  transition: all 0.2s;
-  min-width: 80px;
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 
-.auto-refresh-toggle .toggle-btn.active {
-  background: rgba(34, 197, 94, 0.2);
-  border-color: #22c55e;
-  color: #22c55e;
+.broker-indicator.connected {
+  background: rgba(39, 174, 96, 0.3);
+  color: #27ae60;
+  border: 1px solid #27ae60;
 }
 
-.auto-refresh-toggle .toggle-btn:hover {
-  transform: scale(1.02);
+.broker-indicator.disconnected {
+  background: rgba(231, 76, 60, 0.3);
+  color: #e74c3c;
+  border: 1px solid #e74c3c;
 }
 
 .last-refresh {
-  color: #64748b;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+  opacity: 0.8;
 }
 
+.countdown {
+  color: #00d4ff;
+}
+
+.auto-refresh-btn,
 .refresh-btn {
-  background: #e94560;
-  color: white;
+  padding: 0.5rem 1rem;
   border: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 1.1rem;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: #d1304a;
-  transform: rotate(180deg);
-}
-
-.refresh-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.dashboard-content {
-  padding: 20px;
-  max-width: 1800px;
-  margin: 0 auto;
-}
-
-.tabs {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-  justify-content: center;
-}
-
-.tab {
-  background: rgba(15, 52, 96, 0.5);
-  border: 1px solid #0f3460;
-  color: #94a3b8;
-  padding: 10px 25px;
   border-radius: 8px;
   cursor: pointer;
   font-weight: 500;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
 }
 
-.tab:hover {
-  background: rgba(15, 52, 96, 0.8);
+.auto-refresh-btn {
+  background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
 
-.tab.active {
-  background: #e94560;
-  border-color: #e94560;
+.auto-refresh-btn.active {
+  background: rgba(39, 174, 96, 0.3);
+  color: #27ae60;
+}
+
+.refresh-btn {
+  background: linear-gradient(135deg, #00d4ff, #9b59b6);
   color: #fff;
 }
 
-.grid-layout {
-  display: grid;
-  grid-template-columns: 300px 1fr 350px;
-  gap: 20px;
+.refresh-btn:hover {
+  transform: scale(1.05);
 }
 
-.col-left, .col-right {
+.dashboard-nav {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 2rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.nav-btn {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.nav-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.nav-btn.active {
+  background: linear-gradient(135deg, #00d4ff, #9b59b6);
+  color: #fff;
+}
+
+.dashboard-main {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1.5rem 2rem;
+  min-height: calc(100vh - 140px);
+}
+
+.sidebar {
+  width: 320px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 1rem;
+  flex-shrink: 0;
 }
 
-.col-center {
-  min-height: 500px;
+.content {
+  flex: 1;
+  min-width: 0;
 }
 
-.col-center.col-full {
-  grid-column: 1 / -1;
+.upgrades-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 1.5rem;
 }
 
-.grid-layout.marketplace-mode {
-  grid-template-columns: 1fr;
-}
-
-.tab-content {
-  height: 100%;
-}
-
-.dashboard-footer {
-  text-align: center;
-  padding: 20px;
-  color: #64748b;
-  font-size: 0.875rem;
-  border-top: 1px solid #1e293b;
-  margin-top: 20px;
-}
-
-@media (max-width: 1400px) {
-  .grid-layout {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .col-center {
-    grid-column: span 2;
-    order: 3;
-  }
-}
-
-@media (max-width: 900px) {
-  .grid-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .col-center {
-    grid-column: span 1;
-  }
-
-  .dashboard-header {
+@media (max-width: 1200px) {
+  .dashboard-main {
     flex-direction: column;
-    gap: 15px;
-    text-align: center;
+  }
+
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .sidebar > * {
+    flex: 1;
+    min-width: 280px;
   }
 }
 </style>
