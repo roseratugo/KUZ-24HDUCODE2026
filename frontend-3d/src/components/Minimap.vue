@@ -17,12 +17,18 @@ const cellColors = {
   ROCKS: '#57534e'
 };
 
+let cachedCtx = null;
+
 function draw() {
   const canvas = canvasRef.value;
   if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  canvas.width = SIZE;
-  canvas.height = SIZE;
+  // Cache context and avoid resetting canvas dimensions every frame
+  if (!cachedCtx) {
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    cachedCtx = canvas.getContext('2d');
+  }
+  const ctx = cachedCtx;
 
   const cellPx = SIZE / (RADIUS * 2 + 1);
   const cx = props.shipX;
@@ -102,15 +108,17 @@ function draw() {
   ctx.fillText(`(${cx}, ${cy})`, SIZE / 2, SIZE - 5);
 }
 
-let animFrame = null;
-let lastShipX = null;
-let lastShipY = null;
+let needsRedraw = true;
 
+function scheduleDraw() {
+  needsRedraw = true;
+}
+
+let animFrame = null;
 function loop() {
-  if (props.shipX !== lastShipX || props.shipY !== lastShipY) {
+  if (needsRedraw) {
     draw();
-    lastShipX = props.shipX;
-    lastShipY = props.shipY;
+    needsRedraw = false;
   }
   animFrame = requestAnimationFrame(loop);
 }
@@ -122,10 +130,13 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (animFrame) cancelAnimationFrame(animFrame);
+  cachedCtx = null;
 });
 
-// Redraw when cells change
-watch(() => props.cells.size, draw);
+// Redraw when cells or ship position change
+watch(() => props.cells.size, scheduleDraw);
+watch(() => props.shipX, scheduleDraw);
+watch(() => props.shipY, scheduleDraw);
 </script>
 
 <template>
