@@ -20,8 +20,8 @@ export function loadBoat() {
         const center = box.getCenter(new THREE.Vector3());
         model.position.sub(center.multiplyScalar(scale));
 
-        // Rotate model so its bow aligns with heading direction
-        model.rotation.y = -Math.PI / 2;
+        // Rotate model so its bow faces forward when heading=0
+        model.rotation.y = Math.PI / 2;
 
         // Wrap in a group for easy positioning
         const group = new THREE.Group();
