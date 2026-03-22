@@ -34,7 +34,7 @@ export class GameScene {
     this.scene.fog = new THREE.Fog(0x8eafc1, 200, 800);
 
     // Camera
-    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 20000);
+    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 1500);
     this.camera.position.set(30, 40, 100);
 
     // Controls
@@ -48,8 +48,8 @@ export class GameScene {
     // Sun
     this.sun = new THREE.Vector3();
 
-    // Water
-    const waterGeometry = new THREE.PlaneGeometry(10000, 10000);
+    // Water (sized to fog far distance, not overkill)
+    const waterGeometry = new THREE.PlaneGeometry(2000, 2000);
     this.water = new Water(waterGeometry, {
       textureWidth: 512,
       textureHeight: 512,
@@ -98,6 +98,10 @@ export class GameScene {
     this.boatSpeed = 0; // current scalar speed
     this.prevTargetPos = new THREE.Vector3(0, 9, 0);
 
+    // Pre-allocated vectors for animate() to avoid per-frame GC
+    this._toTarget = new THREE.Vector3();
+    this._scenePos = new THREE.Vector3();
+
     // Islands
     this.islandManager = new IslandManager(this.scene, this.CELL_SIZE);
 
@@ -132,8 +136,9 @@ export class GameScene {
     this.water.material.uniforms['sunDirection'].value.copy(this.sun).normalize();
   }
 
-  worldToScene(x, y) {
-    return new THREE.Vector3(x * this.CELL_SIZE, 0, -y * this.CELL_SIZE);
+  worldToScene(x, y, target) {
+    const out = target || this._scenePos;
+    return out.set(x * this.CELL_SIZE, 0, -y * this.CELL_SIZE);
   }
 
   updateShipPosition(pos) {
@@ -204,8 +209,8 @@ export class GameScene {
     this.water.material.uniforms['time'].value = time;
 
     if (this.boat) {
-      // Direction to target (flat, no Y)
-      const toTarget = new THREE.Vector3(
+      // Direction to target (flat, no Y) — reuse pre-allocated vector
+      const toTarget = this._toTarget.set(
         this.targetBoatPos.x - this.boat.position.x,
         0,
         this.targetBoatPos.z - this.boat.position.z
