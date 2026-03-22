@@ -102,27 +102,35 @@ const draw = () => {
       else if (cell?.state === 'VISITED') ctx.globalAlpha = 0.5;
       else ctx.globalAlpha = 1;
 
-      ctx.fillRect(screenX, screenY, cellPx - 1, cellPx - 1);
+      // At very low zoom, skip gaps between cells for perf
+      const gap = cellPx > 3 ? 1 : 0;
+      ctx.fillRect(screenX, screenY, cellPx - gap, cellPx - gap);
       ctx.globalAlpha = 1;
 
       // Island overlay
       if (cell?.island) {
         const islandColor = getIslandColor(cell);
         ctx.fillStyle = islandColor;
-        ctx.fillRect(screenX, screenY, cellPx - 1, cellPx - 1);
-        ctx.strokeStyle = islandColor === '#22c55e' ? '#86efac' : '#fde047';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(screenX + 1, screenY + 1, cellPx - 3, cellPx - 3);
+        ctx.fillRect(screenX, screenY, cellPx - gap, cellPx - gap);
 
-        // Island emoji
-        ctx.font = `${Math.max(10, cellPx * 0.4)}px serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🏝️', screenX + cellPx / 2, screenY + cellPx / 2);
+        // Only draw details when zoomed in enough
+        if (cellPx >= 8) {
+          ctx.strokeStyle = islandColor === '#22c55e' ? '#86efac' : '#fde047';
+          ctx.lineWidth = cellPx >= 15 ? 2 : 1;
+          ctx.strokeRect(screenX + 1, screenY + 1, cellPx - 3, cellPx - 3);
+        }
+
+        // Island emoji only when cells are big enough
+        if (cellPx >= 18) {
+          ctx.font = `${Math.max(10, cellPx * 0.4)}px serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('🏝️', screenX + cellPx / 2, screenY + cellPx / 2);
+        }
       }
 
-      // Other ships
-      if (cell?.ships?.length) {
+      // Other ships (only when zoomed in)
+      if (cellPx >= 15 && cell?.ships?.length) {
         ctx.font = `${Math.max(8, cellPx * 0.35)}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -136,22 +144,32 @@ const draw = () => {
     const sx = offsetX + shipPosition.value.x * cellPx;
     const sy = offsetY + shipPosition.value.y * cellPx;
 
+    // Ship marker scales with zoom - always visible
+    const markerSize = Math.max(cellPx, 6);
+    const mx = cellPx >= 6 ? sx : sx - (markerSize - cellPx) / 2;
+    const my = cellPx >= 6 ? sy : sy - (markerSize - cellPx) / 2;
+
     // Glow
     ctx.shadowColor = '#e94560';
-    ctx.shadowBlur = 15;
+    ctx.shadowBlur = Math.max(5, 15 * z);
     ctx.strokeStyle = '#e94560';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(sx, sy, cellPx - 1, cellPx - 1);
+    ctx.lineWidth = Math.max(1, 2 * z);
+    ctx.strokeRect(mx, my, markerSize - 1, markerSize - 1);
     ctx.shadowBlur = 0;
 
-    // Ship emoji
-    ctx.font = `${Math.max(12, cellPx * 0.5)}px serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('🚢', sx + cellPx / 2, sy + cellPx / 2);
+    // Ship emoji (or dot at very low zoom)
+    if (cellPx >= 12) {
+      ctx.font = `${Math.max(12, cellPx * 0.5)}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🚢', sx + cellPx / 2, sy + cellPx / 2);
+    } else {
+      ctx.fillStyle = '#e94560';
+      ctx.fillRect(mx, my, markerSize - 1, markerSize - 1);
+    }
   }
 
-  // Grid lines (subtle)
+  // Grid lines (only when zoomed in enough)
   if (z >= 0.8) {
     ctx.strokeStyle = 'rgba(15, 52, 96, 0.3)';
     ctx.lineWidth = 0.5;
@@ -185,8 +203,9 @@ const resizeCanvas = () => {
 
 const handleWheel = (e) => {
   e.preventDefault();
-  const delta = e.deltaY > 0 ? -0.1 : 0.1;
-  zoomLevel.value = Math.max(0.3, Math.min(3, zoomLevel.value + delta));
+  // Scale delta proportionally to current zoom for smooth zoom at all levels
+  const factor = e.deltaY > 0 ? 0.85 : 1.18;
+  zoomLevel.value = Math.max(0.05, Math.min(3, zoomLevel.value * factor));
   mapStore.setZoom(zoomLevel.value);
   draw();
 };
@@ -306,7 +325,7 @@ const onMouseMove = (e) => {
 };
 
 const handleZoom = (delta) => {
-  zoomLevel.value = Math.max(0.3, Math.min(3, zoomLevel.value + delta));
+  zoomLevel.value = Math.max(0.05, Math.min(3, zoomLevel.value + delta));
   mapStore.setZoom(zoomLevel.value);
   draw();
 };
