@@ -31,7 +31,7 @@ export class GameScene {
 
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x8eafc1, 0.0012);
+    this.scene.fog = new THREE.Fog(0x8eafc1, 200, 800);
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 20000);
