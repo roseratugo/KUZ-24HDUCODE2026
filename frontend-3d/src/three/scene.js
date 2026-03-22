@@ -140,9 +140,6 @@ export class GameScene {
       this.boat.position.set(0, 9, 0);
       this.scene.add(this.boat);
 
-      // Debug axes: R=X, G=Y, B=Z (arrow points forward)
-      const axes = new THREE.AxesHelper(20);
-      this.boat.add(axes);
     } catch (err) {
       console.error('Ship model load failed, using fallback');
       // Fallback: simple box
