@@ -372,11 +372,7 @@ export class GameScene {
       );
       const distToTarget = toTarget.length();
 
-      const lerpSpeed = 1 - Math.pow(0.005, delta); // smoother ~3s convergence
-      this.boat.position.x += (this.smoothedTarget.x - this.boat.position.x) * lerpSpeed;
-      this.boat.position.z += (this.smoothedTarget.z - this.boat.position.z) * lerpSpeed;
-
-      // --- Heading: face direction of movement ---
+      // --- Heading: face direction of target ---
       if (distToTarget > 0.5) {
         this.targetHeading = Math.atan2(toTarget.x, toTarget.z);
       }
@@ -386,6 +382,15 @@ export class GameScene {
       while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
+
+      // Move FORWARD along the boat's heading, not directly toward target
+      if (distToTarget > 0.5) {
+        const moveSpeed = Math.min(distToTarget, 30) * delta * 2;
+        const alignment = Math.cos(headingDiff);
+        const forwardFactor = Math.max(0, alignment);
+        this.boat.position.x += Math.sin(this.boatHeading) * moveSpeed * forwardFactor;
+        this.boat.position.z += Math.cos(this.boatHeading) * moveSpeed * forwardFactor;
+      }
 
       // Apply rotation (+90 offset for model orientation)
       this.boat.rotation.y = this.boatHeading + Math.PI / 2;
