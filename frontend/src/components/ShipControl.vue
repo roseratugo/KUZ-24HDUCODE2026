@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useShipStore } from '../stores/ship';
 
 const shipStore = useShipStore();
@@ -22,9 +22,39 @@ const cooldownPercent = computed(() => {
   return (cooldownRemaining.value / shipSpeed.value) * 100;
 });
 
+const lastKeyDirection = ref(null);
+
+// Keyboard mapping (ZQSD + arrows + numpad)
+const KEY_MAP = {
+  'ArrowUp': 'N', 'ArrowDown': 'S', 'ArrowLeft': 'W', 'ArrowRight': 'E',
+  'z': 'N', 's': 'S', 'q': 'W', 'd': 'E',
+  'a': 'NW', 'e': 'NE', 'w': 'SW', 'x': 'SE',
+  '8': 'N', '2': 'S', '4': 'W', '6': 'E',
+  '7': 'NW', '9': 'NE', '1': 'SW', '3': 'SE',
+};
+
+let keyFlashTimeout = null;
+const handleKeyDown = (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+  const direction = KEY_MAP[e.key];
+  if (direction) {
+    e.preventDefault();
+    lastKeyDirection.value = direction;
+    clearTimeout(keyFlashTimeout);
+    keyFlashTimeout = setTimeout(() => { lastKeyDirection.value = null; }, 200);
+    move(direction);
+  }
+};
+
 onMounted(() => {
   shipStore.checkAndRestoreCooldown();
   shipStore.loadMoveHistory();
+  window.addEventListener('keydown', handleKeyDown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
 });
 
 const energyPercent = computed(() => {
@@ -142,21 +172,12 @@ const resetShipData = () => {
     </div>
 
     <div class="controls-section">
-      <h3>Navigation</h3>
-      <div v-if="isOnCooldown" class="cooldown-section">
-        <div class="cooldown-bar-container">
-          <div
-            class="cooldown-bar"
-            :style="{ width: cooldownPercent + '%' }"
-          ></div>
-        </div>
-        <span class="cooldown-text">{{ cooldownRemaining }}ms</span>
-      </div>
+      <h3>Navigation <span class="kbd-hint">ZQSD / Fleches</span></h3>
       <div class="direction-grid" :class="{ 'on-cooldown': isOnCooldown }">
         <button
           v-for="dir in directions"
           :key="dir.row + '-' + dir.col"
-          :class="['direction-btn', { empty: !dir.key, disabled: (energy === 0 || isOnCooldown) && dir.key }]"
+          :class="['direction-btn', { empty: !dir.key, disabled: (energy === 0 || isOnCooldown) && dir.key, active: lastKeyDirection === dir.key }]"
           :disabled="isOnCooldown || !dir.key || energy === 0"
           :style="{ gridRow: dir.row, gridColumn: dir.col }"
           @click="move(dir.key)"
@@ -165,6 +186,15 @@ const resetShipData = () => {
           <span class="dir-icon">{{ dir.icon }}</span>
           <span v-if="dir.key" class="dir-label">{{ dir.label }}</span>
         </button>
+      </div>
+      <div v-if="isOnCooldown" class="cooldown-section">
+        <div class="cooldown-bar-container">
+          <div
+            class="cooldown-bar"
+            :style="{ width: cooldownPercent + '%' }"
+          ></div>
+        </div>
+        <span class="cooldown-text">{{ cooldownRemaining }}ms</span>
       </div>
       <p class="nav-hint">
         {{ moveHistory.length }} mouvement(s) effectue(s)
@@ -382,11 +412,23 @@ h3 {
   text-align: center;
 }
 
+.kbd-hint {
+  font-size: 0.65rem;
+  color: #64748b;
+  font-weight: 400;
+  margin-left: 6px;
+  padding: 2px 6px;
+  background: rgba(15, 52, 96, 0.5);
+  border-radius: 4px;
+  border: 1px solid #0f3460;
+}
+
 .cooldown-section {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-top: 10px;
+  margin-bottom: 6px;
   padding: 8px 12px;
   background: rgba(239, 68, 68, 0.15);
   border-radius: 8px;
@@ -445,7 +487,8 @@ h3 {
   gap: 1px;
 }
 
-.direction-btn:hover:not(:disabled):not(.empty) {
+.direction-btn:hover:not(:disabled):not(.empty),
+.direction-btn.active:not(.empty) {
   background: #e94560;
   transform: scale(1.08);
   box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
