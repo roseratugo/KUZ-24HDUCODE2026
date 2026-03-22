@@ -1,7 +1,7 @@
 import time
 from datetime import datetime
 from typing import Optional, Tuple, Set, List
-from api_client import GameAPIClient
+from api_client import GameAPIClient, BackendAPIClient
 from database import Database
 from config import SAFETY_BUFFER, TICK_INTERVAL, RECHARGE_THRESHOLD
 
@@ -21,6 +21,7 @@ class SmartExplorer:
     def __init__(self):
         self.api = GameAPIClient()
         self.db = Database()
+        self.backend = BackendAPIClient()
 
         # État du bot
         self.running = False
@@ -317,10 +318,12 @@ class SmartExplorer:
                 self.energy = result["energy"]
                 self.move_count += 1
                 self.db.save_ship_position(self.position)
+                self.backend.notify_ship_position(self.position)
 
                 if result.get("discoveredCells"):
                     self.db.save_cells(result["discoveredCells"])
                     self.update_frontier(result["discoveredCells"])
+                    self.backend.notify_cells(result["discoveredCells"])
 
                 self.log(f"Position initiale: ({self.position['x']}, {self.position['y']})")
 
@@ -394,6 +397,10 @@ class SmartExplorer:
                 direction, from_pos, self.position,
                 energy_before, self.energy, len(cells)
             )
+
+            # Notifier le backend pour broadcast WebSocket
+            self.backend.notify_ship_position(self.position)
+            self.backend.notify_cells(cells)
 
             return result
 
@@ -503,9 +510,11 @@ class SmartExplorer:
                 self.energy = result["energy"]
                 self.move_count += 1
                 self.db.save_ship_position(self.position)
+                self.backend.notify_ship_position(self.position)
                 if result.get("discoveredCells"):
                     self.db.save_cells(result["discoveredCells"])
                     self.update_frontier(result["discoveredCells"])
+                    self.backend.notify_cells(result["discoveredCells"])
 
             # Vérifier si rechargé
             if self.energy >= self.max_energy * RECHARGE_THRESHOLD:
