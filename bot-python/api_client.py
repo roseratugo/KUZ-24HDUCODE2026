@@ -21,6 +21,8 @@ class GameAPIClient:
                 response = requests.get(url, headers=self.headers)
             elif method == "POST":
                 response = requests.post(url, headers=self.headers, json=body)
+            elif method == "PUT":
+                response = requests.put(url, headers=self.headers, json=body)
             else:
                 raise ValueError(f"Méthode non supportée: {method}")
 
@@ -71,7 +73,7 @@ class GameAPIClient:
 
     def pay_tax(self, tax_id: str) -> dict:
         """Paie une taxe par son ID"""
-        return self._request("POST", f"/taxes/{tax_id}")
+        return self._request("PUT", f"/taxes/{tax_id}", {})
 
 
 class BackendAPIClient:
