@@ -28,6 +28,29 @@ export class IslandManager {
     this.rebuildTimer = null;
     this.lastHash = '';
 
+    // Shared materials (avoid creating duplicates per mesh)
+    this._sharedMaterials = {
+      terrain: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.02, side: THREE.DoubleSide }),
+      trunk: new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.95 }),
+      bush: new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.28, 0.5, 0.22), roughness: 0.9 }),
+      rock: new THREE.MeshStandardMaterial({ color: 0x5a5a50, roughness: 1.0 }),
+      sand: new THREE.MeshStandardMaterial({ color: 0xc4a060, roughness: 0.95 }),
+      shallow: new THREE.MeshStandardMaterial({ color: 0x1a998e, transparent: true, opacity: 0.2, roughness: 0.3, side: THREE.DoubleSide }),
+      fronds: [],
+    };
+    // Pre-create 3 frond material variants
+    for (let i = 0; i < 3; i++) {
+      this._sharedMaterials.fronds.push(new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(0.30 + i * 0.015, 0.55, 0.25),
+        side: THREE.DoubleSide, roughness: 0.85
+      }));
+    }
+
+    // Reusable Color objects for terrain generation
+    this._tmpColor = new THREE.Color();
+    this._tmpColorA = new THREE.Color();
+    this._tmpColorB = new THREE.Color();
+
     // Pre-generate templates
     this.generateTemplates();
   }
@@ -51,7 +74,7 @@ export class IslandManager {
       pos.setZ(i, pos.getZ(i) * (0.8 + Math.random() * 0.4));
     }
     geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({ color: 0xc4a060, roughness: 0.95 });
+    const mat = this._sharedMaterials.sand;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = 0.5;
     group.add(mesh);
@@ -126,9 +149,7 @@ export class IslandManager {
     // Shallow water ring
     const shallowGeo = new THREE.RingGeometry(worldRadius * 0.85, worldRadius * 1.1, 32);
     shallowGeo.rotateX(-Math.PI / 2);
-    const shallow = new THREE.Mesh(shallowGeo, new THREE.MeshStandardMaterial({
-      color: 0x1a998e, transparent: true, opacity: 0.2, roughness: 0.3, side: THREE.DoubleSide
-    }));
+    const shallow = new THREE.Mesh(shallowGeo, this._sharedMaterials.shallow);
     shallow.position.y = 0.15;
     group.add(shallow);
 
@@ -204,14 +225,16 @@ export class IslandManager {
 
       positions.setY(i, height);
 
-      // Vertex colors
-      const color = new THREE.Color();
+      // Vertex colors — reuse pre-allocated Color objects
+      const color = this._tmpColor;
+      const ca = this._tmpColorA;
+      const cb = this._tmpColorB;
       if (height < -0.5) color.setRGB(0.15, 0.12, 0.1);
-      else if (height < 0.3) color.lerpColors(new THREE.Color(0x6b5a3e), new THREE.Color(0xd4b896), Math.max(0, (height + 0.5) / 0.8));
-      else if (height < 1.2) color.lerpColors(new THREE.Color(0xf0ddb8), new THREE.Color(0xe8d5a0), (height - 0.3) / 0.9);
-      else if (height < 2.0) color.lerpColors(new THREE.Color(0xc8c080), new THREE.Color(0x5a9a2a), (height - 1.2) / 0.8);
-      else if (height < 4.5) color.lerpColors(new THREE.Color(0x4a8a28), new THREE.Color(0x2d6b1a), (height - 2.0) / 2.5);
-      else color.lerpColors(new THREE.Color(0x3a5a20), new THREE.Color(0x7a7a6a), Math.min(1, (height - 4.5) / 2));
+      else if (height < 0.3) color.lerpColors(ca.set(0x6b5a3e), cb.set(0xd4b896), Math.max(0, (height + 0.5) / 0.8));
+      else if (height < 1.2) color.lerpColors(ca.set(0xf0ddb8), cb.set(0xe8d5a0), (height - 0.3) / 0.9);
+      else if (height < 2.0) color.lerpColors(ca.set(0xc8c080), cb.set(0x5a9a2a), (height - 1.2) / 0.8);
+      else if (height < 4.5) color.lerpColors(ca.set(0x4a8a28), cb.set(0x2d6b1a), (height - 2.0) / 2.5);
+      else color.lerpColors(ca.set(0x3a5a20), cb.set(0x7a7a6a), Math.min(1, (height - 4.5) / 2));
 
       colors[i * 3] = color.r;
       colors[i * 3 + 1] = color.g;
@@ -236,9 +259,7 @@ export class IslandManager {
   }
 
   createTerrainMaterial() {
-    return new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.85, metalness: 0.02, side: THREE.DoubleSide
-    });
+    return this._sharedMaterials.terrain;
   }
 
   // ===== Vegetation (generated once per template) =====
@@ -257,7 +278,7 @@ export class IslandManager {
     ]);
 
     const trunkGeo = new THREE.TubeGeometry(curve, 6, 0.14, 5, false);
-    tree.add(new THREE.Mesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.95 })));
+    tree.add(new THREE.Mesh(trunkGeo, this._sharedMaterials.trunk));
 
     const top = curve.getPoint(1);
     const frondCount = 6;
@@ -278,10 +299,7 @@ export class IslandManager {
 
       const frond = new THREE.Mesh(
         new THREE.ShapeGeometry(frondShape, 1),
-        new THREE.MeshStandardMaterial({
-          color: new THREE.Color().setHSL(0.30 + (i % 3) * 0.015, 0.55, 0.25),
-          side: THREE.DoubleSide, roughness: 0.85
-        })
+        this._sharedMaterials.fronds[i % 3]
       );
       frond.position.copy(top);
       frond.rotation.set(droop * 0.7, fAngle, -droop * 0.3);
@@ -296,9 +314,7 @@ export class IslandManager {
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) pos.setY(i, pos.getY(i) * 0.6);
     geo.computeVertexNormals();
-    return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(0.28, 0.5, 0.22), roughness: 0.9
-    }));
+    return new THREE.Mesh(geo, this._sharedMaterials.bush);
   }
 
   createRock(seed) {
@@ -306,7 +322,7 @@ export class IslandManager {
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) pos.setY(i, pos.getY(i) * 0.4);
     geo.computeVertexNormals();
-    const rock = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x5a5a50, roughness: 1.0 }));
+    const rock = new THREE.Mesh(geo, this._sharedMaterials.rock);
     rock.scale.setScalar(1.5);
     return rock;
   }
@@ -355,14 +371,17 @@ export class IslandManager {
       if (visited.has(key)) continue;
       const cluster = [];
       const queue = [key];
+      let qIdx = 0; // index-based queue avoids O(n) shift()
       visited.add(key);
 
-      while (queue.length > 0) {
-        const k = queue.shift();
+      while (qIdx < queue.length) {
+        const k = queue[qIdx++];
         const c = this.sandCells.get(k);
         if (c) cluster.push(c);
 
-        const [cx, cy] = k.split(',').map(Number);
+        const commaIdx = k.indexOf(',');
+        const cx = +k.substring(0, commaIdx);
+        const cy = +k.substring(commaIdx + 1);
         for (const nk of [
           `${cx-1},${cy}`, `${cx+1},${cy}`, `${cx},${cy-1}`, `${cx},${cy+1}`,
           `${cx-1},${cy-1}`, `${cx+1},${cy-1}`, `${cx-1},${cy+1}`, `${cx+1},${cy+1}`
@@ -378,44 +397,69 @@ export class IslandManager {
     return clusters;
   }
 
+  // Helper to compute min/max without spread (avoids stack overflow on large arrays)
+  _minMax(cells) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (c.x < minX) minX = c.x;
+      if (c.x > maxX) maxX = c.x;
+      if (c.y < minY) minY = c.y;
+      if (c.y > maxY) maxY = c.y;
+    }
+    return { minX, maxX, minY, maxY };
+  }
+
+  // Dispose a group's geometries (materials are shared, don't dispose them)
+  _disposeGroup(group) {
+    group.traverse(child => {
+      if (child.isMesh && child.geometry) {
+        child.geometry.dispose();
+      }
+    });
+  }
+
   rebuildAll() {
     const clusters = this.findClusters();
 
     // Hash: sorted list of "category:cx:cy" to detect changes
-    const hash = clusters.map(cells => {
+    const hashParts = [];
+    for (let i = 0; i < clusters.length; i++) {
+      const cells = clusters[i];
       const cat = getCategory(cells.length);
-      const xs = cells.map(c => c.x);
-      const ys = cells.map(c => c.y);
-      const cx = Math.round((Math.min(...xs) + Math.max(...xs)) / 2);
-      const cy = Math.round((Math.min(...ys) + Math.max(...ys)) / 2);
-      return `${cat}:${cx}:${cy}`;
-    }).sort().join('|');
+      const { minX, maxX, minY, maxY } = this._minMax(cells);
+      const cx = Math.round((minX + maxX) / 2);
+      const cy = Math.round((minY + maxY) / 2);
+      hashParts.push(`${cat}:${cx}:${cy}`);
+    }
+    const hash = hashParts.sort().join('|');
 
     if (hash === this.lastHash) return;
     this.lastHash = hash;
 
-    // Clear existing
+    // Clear existing — dispose geometries to free GPU memory
     for (const [, mesh] of this.islandMeshes) {
       this.scene.remove(mesh);
+      this._disposeGroup(mesh);
     }
     this.islandMeshes.clear();
 
     // Place clones
-    clusters.forEach((cells, i) => {
+    for (let i = 0; i < clusters.length; i++) {
+      const cells = clusters[i];
       const cat = getCategory(cells.length);
       const template = this.templates.get(cat);
-      if (!template) return;
+      if (!template) continue;
 
-      const xs = cells.map(c => c.x);
-      const ys = cells.map(c => c.y);
-      const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
-      const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const { minX, maxX, minY, maxY } = this._minMax(cells);
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
 
       const clone = template.clone();
 
       // Scale based on actual cluster size vs template size
-      const spanX = Math.max(...xs) - Math.min(...xs) + 1;
-      const spanY = Math.max(...ys) - Math.min(...ys) + 1;
+      const spanX = maxX - minX + 1;
+      const spanY = maxY - minY + 1;
       const actualRadius = Math.max(spanX, spanY) / 2 + 1;
 
       let templateRadius;
@@ -438,9 +482,7 @@ export class IslandManager {
 
       this.scene.add(clone);
       this.islandMeshes.set(i, clone);
-    });
-
-    console.log(`Placed ${clusters.length} island(s) from ${this.sandCells.size} cells`);
+    }
   }
 
   updateIsland(island) {}
