@@ -388,7 +388,7 @@ export class GameScene {
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
       // Apply rotation (+90 offset for model orientation)
-      this.boat.rotation.y = this.boatHeading - Math.PI / 2;
+      this.boat.rotation.y = this.boatHeading + Math.PI / 2;
 
       // Roll into turns
       const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
