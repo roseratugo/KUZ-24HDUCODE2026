@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, onUnmounted, computed } from 'vue';
 import {
-  fetchPlayerDetails, fetchResources, fetchOffers, purchaseOffer,
+  fetchPlayerDetails, fetchResources, purchaseOffer,
   createOffer, deleteOffer, fetchThefts, launchTheft, fetchIslands,
   botStart, botStop, botPause, botResume, botStatus, botLogs, botClearLogs
 } from '../three/api.js';
@@ -255,8 +255,7 @@ async function loadTab(tab) {
       discoveredIslands.value = details.discoveredIslands || [];
       homeIsland.value = details.home || null;
     } else if (tab === 'marketplace') {
-      const [off, details] = await Promise.all([fetchOffers(), fetchPlayerDetails()]);
-      offers.value = Array.isArray(off) ? off : [];
+      const details = await fetchPlayerDetails();
       money.value = details.money ?? 0;
       resources.value = details.resources || [];
     } else if (tab === 'islands') {
@@ -287,12 +286,20 @@ watch(() => props.visible, (v) => {
 
 onUnmounted(() => { stopBotPolling(); disconnectBroker(); });
 
+async function refreshPlayerInfo() {
+  try {
+    const details = await fetchPlayerDetails();
+    money.value = details.money ?? 0;
+    resources.value = details.resources || [];
+  } catch (e) { /* ignore */ }
+}
+
 async function doPurchase(offerId) {
   const qty = buyQty.value[offerId] || 1;
   try {
     await purchaseOffer(offerId, qty);
     buyQty.value[offerId] = 1;
-    await loadTab('marketplace');
+    await refreshPlayerInfo();
   } catch (err) {
     error.value = err.response?.data?.message || 'Achat echoue';
   }
@@ -302,7 +309,7 @@ async function doCreateOffer() {
   try {
     await createOffer(newOffer.value.resourceType, newOffer.value.quantity, newOffer.value.unitPrice);
     newOffer.value = { resourceType: 'BOISIUM', quantity: 1, unitPrice: 1 };
-    await loadTab('marketplace');
+    await refreshPlayerInfo();
   } catch (err) {
     error.value = err.response?.data?.message || 'Creation echouee';
   }
@@ -311,7 +318,6 @@ async function doCreateOffer() {
 async function doDeleteOffer(offerId) {
   try {
     await deleteOffer(offerId);
-    await loadTab('marketplace');
   } catch (err) {
     error.value = err.response?.data?.message || 'Suppression echouee';
   }
