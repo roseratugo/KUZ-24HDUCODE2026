@@ -392,12 +392,14 @@ export class GameScene {
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
-      // Apply rotation
+      // Use YXZ Euler order: heading (Y) first, then pitch/backflip (X), then roll (Z)
+      this.boat.rotation.order = 'YXZ';
+
+      // Heading
       this.boat.rotation.y = this.boatHeading + Math.PI;
 
-      // Roll into turns (on X axis — lateral tilt)
-      const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.4, -0.15, 0.15);
-      this.boat.rotation.x = THREE.MathUtils.lerp(this.boat.rotation.x, targetRoll, 1 - Math.pow(0.005, delta));
+      // Roll into turns
+      const targetRoll = THREE.MathUtils.clamp(headingDiff * 0.3, -0.1, 0.1);
 
       // Backflip animation (Y key)
       let jumpY = 0;
@@ -419,7 +421,7 @@ export class GameScene {
             jumpY = -this._diveDepth * Math.sin(p * Math.PI);
           }
 
-          // Backflip rotation on Z axis (forward/back flip)
+          // Backflip on X axis (pitch axis in YXZ order = lateral axis)
           if (t < 0.1) {
             const p = t / 0.1;
             flipAngle = p * p * 0.2;
@@ -437,14 +439,15 @@ export class GameScene {
         }
       }
 
-      // Apply pitch/backflip on Z, roll on X
+      // Apply: X = pitch/backflip (lateral axis), Z = roll (forward axis)
       const speed = Math.min(1, distToTarget);
       if (isFlipping) {
-        this.boat.rotation.z = flipAngle;
-        this.boat.rotation.x = 0;
+        this.boat.rotation.x = flipAngle;
+        this.boat.rotation.z = 0;
       } else {
         const targetPitch = -speed * 0.03 + Math.sin(time * 1.2) * 0.015;
-        this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, targetPitch, 1 - Math.pow(0.05, delta));
+        this.boat.rotation.x = THREE.MathUtils.lerp(this.boat.rotation.x, targetPitch, 1 - Math.pow(0.05, delta));
+        this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, targetRoll, 1 - Math.pow(0.005, delta));
       }
 
       // Bobbing + jump
