@@ -381,10 +381,20 @@ export class GameScene {
       this.boat.position.x += (this.smoothedTarget.x - this.boat.position.x) * lerpSpeed;
       this.boat.position.z += (this.smoothedTarget.z - this.boat.position.z) * lerpSpeed;
 
+      // Heading: face direction of movement
+      if (distToTarget > 0.5) {
+        this.targetHeading = Math.atan2(toTarget.x, toTarget.z);
+      }
+
+      // Smooth turn
+      let headingDiff = this.targetHeading - this.boatHeading;
+      while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
+      while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
+      this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
+
       // Use YXZ Euler order: heading (Y) first, then pitch/backflip (X), then roll (Z)
       this.boat.rotation.order = 'YXZ';
-
-      let headingDiff = 0;
+      this.boat.rotation.y = this.boatHeading;
 
       // Backflip animation (Y key)
       let jumpY = 0;
