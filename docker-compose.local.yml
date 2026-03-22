@@ -19,6 +19,8 @@ services:
     build: ./backend
     container_name: kuz-backend
     restart: unless-stopped
+    ports:
+      - "3001:3001"
     environment:
       - NODE_ENV=production
       - PORT=3001
@@ -38,10 +40,32 @@ services:
     build: ./frontend
     container_name: kuz-frontend
     restart: unless-stopped
+    ports:
+      - "3000:80"
     networks:
       - kuz-network
     depends_on:
       - backend
+
+  bot-python:
+    build: ./bot-python
+    container_name: kuz-bot-python
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/kuz3026
+      - GAME_ID=kuz-default
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - kuz-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
 
 networks:
   kuz-network:

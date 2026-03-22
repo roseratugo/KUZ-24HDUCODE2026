@@ -63,6 +63,20 @@ services:
     depends_on:
       - backend
 
+  bot-python:
+    image: ghcr.io/roseratugo/kuz-bot-python:latest
+    container_name: kuz-bot-python
+    restart: unless-stopped
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/kuz3026
+      - GAME_ID=kuz-team
+    networks:
+      - kuz-network
+      - proxy_net
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
 networks:
   kuz-network:
     driver: bridge
