@@ -1,5 +1,5 @@
 import requests
-from config import GAME_API, CODINGGAME_ID
+from config import GAME_API, CODINGGAME_ID, BACKEND_API, GAME_ID
 
 
 class GameAPIClient:
@@ -64,3 +64,43 @@ class GameAPIClient:
             return self._request("GET", "/ship/position")
         except:
             return None
+
+
+class BackendAPIClient:
+    """Client pour l'API backend (déclenche les broadcasts WebSocket)"""
+
+    def __init__(self):
+        self.base_url = BACKEND_API
+        self.game_id = GAME_ID
+
+    def notify_ship_position(self, position: dict):
+        """Notifie le backend de la nouvelle position (broadcast WebSocket)"""
+        try:
+            requests.put(
+                f"{self.base_url}/api/ship-position/{self.game_id}",
+                json={
+                    "x": position["x"],
+                    "y": position["y"],
+                    "type": position.get("type"),
+                    "zone": position.get("zone")
+                },
+                timeout=3
+            )
+        except Exception:
+            pass  # Ne pas bloquer le bot si le backend est indisponible
+
+    def notify_cells(self, cells: list):
+        """Notifie le backend des nouvelles cellules (broadcast WebSocket)"""
+        if not cells:
+            return
+        try:
+            requests.post(
+                f"{self.base_url}/api/cells/bulk",
+                json={
+                    "gameId": self.game_id,
+                    "cells": cells
+                },
+                timeout=3
+            )
+        except Exception:
+            pass

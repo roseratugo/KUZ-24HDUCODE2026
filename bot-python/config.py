@@ -11,6 +11,9 @@ CODINGGAME_ID = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjb2RpbmdnYW1lIi
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017/kuz")
 GAME_ID = os.getenv("GAME_ID", "kuz-default")
 
+# Backend API (for WebSocket broadcasts)
+BACKEND_API = os.getenv("BACKEND_API", "http://backend:3001")
+
 # Bot settings
 SAFETY_BUFFER = 5  # Marge de sécurité en énergie
 TICK_INTERVAL = 1.0  # Secondes entre chaque tick
