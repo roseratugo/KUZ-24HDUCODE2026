@@ -60,7 +60,7 @@ export async function purchaseOffer(offerId, quantity) {
 }
 
 export async function createOffer(resourceType, quantity, unitPrice) {
-  const res = await gameClient.post("/marketplace/offers", { resourceType, quantity, unitPrice });
+  const res = await gameClient.post("/marketplace/offers", { resourceType, quantityIn: quantity, pricePerResource: unitPrice });
   return res.data;
 }
 

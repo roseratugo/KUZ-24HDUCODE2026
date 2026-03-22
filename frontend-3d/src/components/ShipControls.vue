@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { moveShip, fetchPlayerDetails } from '../three/api.js';
 
 const emit = defineEmits(['moved']);
@@ -34,6 +34,7 @@ const directions = [
 ];
 
 let cooldownTimer = null;
+let detailsPollTimer = null;
 
 function startCooldown() {
   cooldownRemaining.value = shipSpeed.value;
@@ -78,8 +79,7 @@ function handleKeydown(e) {
   }
 }
 
-onMounted(async () => {
-  window.addEventListener('keydown', handleKeydown);
+async function refreshEnergy() {
   try {
     const details = await fetchPlayerDetails();
     if (details.ship) {
@@ -87,9 +87,19 @@ onMounted(async () => {
       maxEnergy.value = details.ship.level?.maxMovement ?? 100;
       shipSpeed.value = details.ship.level?.speed ?? 5000;
     }
-  } catch (err) {
-    console.warn('[3D] Could not fetch player details:', err.message);
-  }
+  } catch (e) { /* ignore */ }
+}
+
+onMounted(async () => {
+  window.addEventListener('keydown', handleKeydown);
+  await refreshEnergy();
+  detailsPollTimer = setInterval(refreshEnergy, 5000);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown);
+  if (detailsPollTimer) clearInterval(detailsPollTimer);
+  if (cooldownTimer) clearInterval(cooldownTimer);
 });
 </script>
 
