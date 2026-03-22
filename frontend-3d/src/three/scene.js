@@ -31,8 +31,7 @@ export class GameScene {
 
     // Scene
     this.scene = new THREE.Scene();
-    const fogColor = new THREE.Color(0xb0cfe0);
-    this.scene.fog = new THREE.FogExp2(fogColor, 0.0012);
+    this.scene.fog = new THREE.Fog(0x8eafc1, 200, 800);
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 20000);
@@ -70,9 +69,10 @@ export class GameScene {
     this.water.position.y = 0;
     this.scene.add(this.water);
 
-    // Sky — render to cubemap for background
+    // Sky
     this.sky = new Sky();
     this.sky.scale.setScalar(10000);
+    this.scene.add(this.sky);
 
     const skyUniforms = this.sky.material.uniforms;
     skyUniforms['turbidity'].value = 10;
@@ -81,15 +81,6 @@ export class GameScene {
     skyUniforms['mieDirectionalG'].value = 0.8;
 
     this.updateSun();
-
-    // Render sky to cubemap and use as scene background
-    const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-    const skyScene = new THREE.Scene();
-    skyScene.add(this.sky);
-    const skyEnv = pmremGenerator.fromScene(skyScene).texture;
-    this.scene.background = skyEnv;
-    this.scene.environment = skyEnv;
-    pmremGenerator.dispose();
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0x6688aa, 1.5);
