@@ -7,6 +7,8 @@ services:
       MONGO_INITDB_DATABASE: kuz3026
     volumes:
       - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
     networks:
       - kuz-network
     healthcheck:
@@ -35,9 +37,36 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+    develop:
+      watch:
+        - path: ./backend/src
+          action: sync
+          target: /app/src
+        - path: ./backend/package.json
+          action: rebuild
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: kuz-mongo-express
+    restart: unless-stopped
+    environment:
+      - ME_CONFIG_MONGODB_URL=mongodb://mongodb:27017/kuz3026
+      - ME_CONFIG_BASICAUTH=false
+    ports:
+      - "8081:8081"
+    networks:
+      - kuz-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_BACKEND_URL=
+        - VITE_GAME_ID=kuz-team
     container_name: kuz-frontend
     restart: unless-stopped
     ports:
@@ -46,13 +75,40 @@ services:
       - kuz-network
     depends_on:
       - backend
+    develop:
+      watch:
+        - path: ./frontend/src
+          action: sync
+          target: /app/src
+        - path: ./frontend/package.json
+          action: rebuild
+
+  frontend-3d:
+    build:
+      context: ./frontend-3d
+      dockerfile: Dockerfile
+    container_name: kuz-frontend-3d
+    restart: unless-stopped
+    ports:
+      - "3002:80"
+    networks:
+      - kuz-network
+    depends_on:
+      - backend
+    develop:
+      watch:
+        - path: ./frontend-3d/src
+          action: sync
+          target: /app/src
+        - path: ./frontend-3d/package.json
+          action: rebuild
 
   bot-python:
     build: ./bot-python
     container_name: kuz-bot-python
     restart: unless-stopped
     ports:
-      - "3002:3002"
+      - "3003:3002"
     environment:
       - MONGO_URI=mongodb://mongodb:27017/kuz3026
       - GAME_ID=kuz-default
@@ -66,6 +122,15 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+    develop:
+      watch:
+        - path: ./bot-python
+          action: sync
+          target: /app
+          ignore:
+            - __pycache__/
+        - path: ./bot-python/requirements.txt
+          action: rebuild
 
 networks:
   kuz-network:

@@ -38,7 +38,6 @@ const priceHistorySchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for efficient queries
 priceHistorySchema.index({ gameId: 1, resourceType: 1, timestamp: -1 });
 
 export default mongoose.model('PriceHistory', priceHistorySchema);

@@ -28,7 +28,6 @@ export class BirdManager {
         this.birdTemplate = gltf.scene;
         this.templateAnimations = gltf.animations;
 
-        // Compute original bounding box for scaling
         const box = new THREE.Box3().setFromObject(this.birdTemplate);
         const size = box.getSize(new THREE.Vector3());
         this._templateMaxDim = Math.max(size.x, size.y, size.z);
@@ -48,19 +47,15 @@ export class BirdManager {
     const birds = [];
 
     for (let i = 0; i < count; i++) {
-      // SkeletonUtils.clone properly handles skinned meshes + bones
       const birdScene = SkeletonUtils.clone(this.birdTemplate);
 
-      // Scale the cloned scene
       const s = BIRD_SCALE / this._templateMaxDim;
       birdScene.scale.setScalar(s);
 
-      // Wrap in a group for orbit positioning
       const group = new THREE.Group();
       group.add(birdScene);
       this.scene.add(group);
 
-      // Animation mixer — must target the cloned scene
       let mixer = null;
       let action = null;
       if (this.templateAnimations.length > 0) {
@@ -106,19 +101,16 @@ export class BirdManager {
         const p = bird.params;
         const angle = elapsed * p.orbitSpeed + p.phaseOffset;
 
-        // Circular orbit around island center
         const x = p.center.x + Math.cos(angle) * p.orbitRadius;
         const z = p.center.z + Math.sin(angle) * p.orbitRadius;
         const y = p.height + Math.sin(elapsed * p.bobFreq + p.phaseOffset) * p.bobAmp;
 
         bird.mesh.position.set(x, y, z);
 
-        // Face direction of travel (tangent to circle)
         const tx = -Math.sin(angle);
         const tz = Math.cos(angle);
         bird.mesh.rotation.y = Math.atan2(tx, tz);
 
-        // Bank into the turn
         bird.mesh.rotation.z = -p.bankAmount;
       }
     }

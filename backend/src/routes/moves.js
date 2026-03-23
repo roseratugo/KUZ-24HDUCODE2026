@@ -3,7 +3,6 @@ import Move from '../models/Move.js';
 
 const router = express.Router();
 
-// Get all moves for a game
 router.get('/:gameId', async (req, res) => {
   try {
     const moves = await Move.find({ gameId: req.params.gameId })
@@ -15,7 +14,6 @@ router.get('/:gameId', async (req, res) => {
   }
 });
 
-// Get recent moves (last N)
 router.get('/:gameId/recent/:limit', async (req, res) => {
   try {
     const limit = parseInt(req.params.limit) || 50;
@@ -28,7 +26,6 @@ router.get('/:gameId/recent/:limit', async (req, res) => {
   }
 });
 
-// Add a new move
 router.post('/', async (req, res) => {
   try {
     const moveData = {
@@ -52,7 +49,6 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Get move stats for a game
 router.get('/:gameId/stats', async (req, res) => {
   try {
     const stats = await Move.aggregate([
@@ -81,7 +77,6 @@ router.get('/:gameId/stats', async (req, res) => {
       });
     }
 
-    // Count directions
     const directionCounts = {};
     stats[0].directionCounts.forEach(dir => {
       directionCounts[dir] = (directionCounts[dir] || 0) + 1;
@@ -99,7 +94,6 @@ router.get('/:gameId/stats', async (req, res) => {
   }
 });
 
-// Clear all moves for a game (useful for reset)
 router.delete('/:gameId', async (req, res) => {
   try {
     const result = await Move.deleteMany({ gameId: req.params.gameId });

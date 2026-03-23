@@ -98,7 +98,6 @@ export const useBotStore = defineStore('bot', () => {
       if (res.data.length > 0) {
         logs.value.push(...res.data);
         lastLogId.value = res.data[res.data.length - 1].id + 1;
-        // Keep last 200 logs in frontend
         if (logs.value.length > 200) {
           logs.value = logs.value.slice(-200);
         }
@@ -132,7 +131,6 @@ export const useBotStore = defineStore('bot', () => {
     }
   }
 
-  // Initialize: fetch status and start polling if bot is running
   async function init() {
     await fetchStatus();
     if (status.value.running) {

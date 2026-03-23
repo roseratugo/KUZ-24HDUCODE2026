@@ -1,18 +1,16 @@
-import express from 'express';
-import Offer from '../models/Offer.js';
+import express from "express";
+import Offer from "../models/Offer.js";
 
 const router = express.Router();
 
-// Get all offers for a game (from cache)
-router.get('/:gameId', async (req, res) => {
+router.get("/:gameId", async (req, res) => {
   try {
     const offers = await Offer.find({
       gameId: req.params.gameId,
-      deleted: false
+      deleted: false,
     }).sort({ unitPrice: 1 });
 
-    // Transformer pour le frontend
-    const formattedOffers = offers.map(o => ({
+    const formattedOffers = offers.map((o) => ({
       id: o.offerId,
       owner: o.owner,
       resourceType: o.resourceType,
@@ -21,7 +19,7 @@ router.get('/:gameId', async (req, res) => {
       unitPrice: o.unitPrice,
       pricePerResource: o.unitPrice,
       createdAt: o.createdAt,
-      lastSyncAt: o.lastSyncAt
+      lastSyncAt: o.lastSyncAt,
     }));
 
     res.json(formattedOffers);
@@ -30,16 +28,15 @@ router.get('/:gameId', async (req, res) => {
   }
 });
 
-// Get offers by resource type
-router.get('/:gameId/:resourceType', async (req, res) => {
+router.get("/:gameId/:resourceType", async (req, res) => {
   try {
     const offers = await Offer.find({
       gameId: req.params.gameId,
       resourceType: req.params.resourceType,
-      deleted: false
+      deleted: false,
     }).sort({ unitPrice: 1 });
 
-    const formattedOffers = offers.map(o => ({
+    const formattedOffers = offers.map((o) => ({
       id: o.offerId,
       owner: o.owner,
       resourceType: o.resourceType,
@@ -48,7 +45,7 @@ router.get('/:gameId/:resourceType', async (req, res) => {
       unitPrice: o.unitPrice,
       pricePerResource: o.unitPrice,
       createdAt: o.createdAt,
-      lastSyncAt: o.lastSyncAt
+      lastSyncAt: o.lastSyncAt,
     }));
 
     res.json(formattedOffers);
@@ -57,20 +54,18 @@ router.get('/:gameId/:resourceType', async (req, res) => {
   }
 });
 
-// Sync offers from external API (called by sync service)
-router.post('/:gameId/sync', async (req, res) => {
+router.post("/:gameId/sync", async (req, res) => {
   try {
     const { offers } = req.body;
     const gameId = req.params.gameId;
 
     if (!Array.isArray(offers)) {
-      return res.status(400).json({ error: 'offers must be an array' });
+      return res.status(400).json({ error: "offers must be an array" });
     }
 
     const now = new Date();
     const syncedIds = [];
 
-    // Upsert each offer
     for (const offer of offers) {
       const offerId = offer.id;
       syncedIds.push(offerId);
@@ -85,42 +80,40 @@ router.post('/:gameId/sync', async (req, res) => {
           quantity: offer.quantityIn || offer.quantity || 0,
           unitPrice: offer.pricePerResource || offer.unitPrice || 0,
           lastSyncAt: now,
-          deleted: false
+          deleted: false,
         },
-        { upsert: true, new: true }
+        { upsert: true, new: true },
       );
     }
 
-    // Mark offers not in sync as deleted
     await Offer.updateMany(
       {
         gameId,
         offerId: { $nin: syncedIds },
-        deleted: false
+        deleted: false,
       },
       {
         deleted: true,
-        lastSyncAt: now
-      }
+        lastSyncAt: now,
+      },
     );
 
     res.json({
       synced: syncedIds.length,
-      timestamp: now.toISOString()
+      timestamp: now.toISOString(),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Update offer from broker event (OFFRE)
-router.post('/:gameId/broker/offer', async (req, res) => {
+router.post("/:gameId/broker/offer", async (req, res) => {
   try {
     const { offer } = req.body;
     const gameId = req.params.gameId;
 
     if (!offer || !offer.id) {
-      return res.status(400).json({ error: 'offer with id required' });
+      return res.status(400).json({ error: "offer with id required" });
     }
 
     const result = await Offer.findOneAndUpdate(
@@ -133,9 +126,9 @@ router.post('/:gameId/broker/offer', async (req, res) => {
         quantity: offer.quantityIn || offer.quantity || 0,
         unitPrice: offer.pricePerResource || offer.unitPrice || 0,
         lastSyncAt: new Date(),
-        deleted: false
+        deleted: false,
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     res.json({ success: true, offer: result });
@@ -144,14 +137,13 @@ router.post('/:gameId/broker/offer', async (req, res) => {
   }
 });
 
-// Update offer quantity from broker event (ACHAT)
-router.post('/:gameId/broker/purchase', async (req, res) => {
+router.post("/:gameId/broker/purchase", async (req, res) => {
   try {
     const { offerId, quantity } = req.body;
     const gameId = req.params.gameId;
 
     if (!offerId || quantity === undefined) {
-      return res.status(400).json({ error: 'offerId and quantity required' });
+      return res.status(400).json({ error: "offerId and quantity required" });
     }
 
     const offer = await Offer.findOne({ gameId, offerId });
@@ -167,26 +159,25 @@ router.post('/:gameId/broker/purchase', async (req, res) => {
       await offer.save();
       res.json({ success: true, offer });
     } else {
-      res.json({ success: false, message: 'Offer not found' });
+      res.json({ success: false, message: "Offer not found" });
     }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Delete offer from broker event (OFFRE_SUPPRIMEE)
-router.post('/:gameId/broker/delete', async (req, res) => {
+router.post("/:gameId/broker/delete", async (req, res) => {
   try {
     const { offerId } = req.body;
     const gameId = req.params.gameId;
 
     if (!offerId) {
-      return res.status(400).json({ error: 'offerId required' });
+      return res.status(400).json({ error: "offerId required" });
     }
 
     await Offer.findOneAndUpdate(
       { gameId, offerId },
-      { deleted: true, lastSyncAt: new Date() }
+      { deleted: true, lastSyncAt: new Date() },
     );
 
     res.json({ success: true });
@@ -195,14 +186,13 @@ router.post('/:gameId/broker/delete', async (req, res) => {
   }
 });
 
-// Save own offer (created by us, before API sync)
-router.post('/:gameId/own', async (req, res) => {
+router.post("/:gameId/own", async (req, res) => {
   try {
     const { offer } = req.body;
     const gameId = req.params.gameId;
 
     if (!offer || !offer.id) {
-      return res.status(400).json({ error: 'offer with id required' });
+      return res.status(400).json({ error: "offer with id required" });
     }
 
     const result = await Offer.findOneAndUpdate(
@@ -216,9 +206,9 @@ router.post('/:gameId/own', async (req, res) => {
         unitPrice: offer.pricePerResource || offer.unitPrice || 0,
         lastSyncAt: new Date(),
         deleted: false,
-        isOwn: true // Marquer comme notre propre offre
+        isOwn: true,
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     console.log(`[Offers] Own offer saved: ${offer.id}`);
@@ -228,20 +218,20 @@ router.post('/:gameId/own', async (req, res) => {
   }
 });
 
-// Get sync status
-router.get('/:gameId/status', async (req, res) => {
+router.get("/:gameId/status", async (req, res) => {
   try {
-    const lastOffer = await Offer.findOne({ gameId: req.params.gameId })
-      .sort({ lastSyncAt: -1 });
+    const lastOffer = await Offer.findOne({ gameId: req.params.gameId }).sort({
+      lastSyncAt: -1,
+    });
 
     const count = await Offer.countDocuments({
       gameId: req.params.gameId,
-      deleted: false
+      deleted: false,
     });
 
     res.json({
       lastSync: lastOffer?.lastSyncAt || null,
-      activeOffers: count
+      activeOffers: count,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

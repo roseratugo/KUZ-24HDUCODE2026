@@ -27,7 +27,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
       if (offers.length === 0) return null;
       return Math.min(...offers.map(o => o.unitPrice));
     },
-    // Stats pour un type de ressource
     resourceStats: (state) => (resourceType) => {
       const history = state.priceHistory[resourceType] || [];
       if (history.length === 0) return null;
@@ -46,23 +45,19 @@ export const useMarketplaceStore = defineStore('marketplace', {
   },
 
   actions: {
-    // Initialiser et s'abonner aux evenements broker
     async init() {
-      // S'abonner aux evenements broker d'abord (prioritaire)
       const brokerStore = useBrokerStore();
       this.unsubscribe = brokerStore.subscribe(
         ['ACHAT', 'OFFRE', 'OFFRE_SUPPRIMEE'],
         this.handleBrokerEvent.bind(this)
       );
 
-      // Charger les donnees initiales (peut echouer a cause du rate limiting)
       try {
         await this.fetchOffers();
       } catch (err) {
         console.log('[MarketplaceStore] Fetch initial skipped (rate limiting), waiting for broker events');
       }
 
-      // Charger l'historique des prix depuis notre backend
       await this.loadPriceHistory();
     },
 
@@ -78,29 +73,24 @@ export const useMarketplaceStore = defineStore('marketplace', {
 
       switch (eventType) {
         case 'OFFRE':
-          // Nouvelle offre creee
           this.handleNewOffer(data);
           break;
 
         case 'ACHAT':
-          // Achat effectue - mettre a jour l'offre
           this.handlePurchase(data);
           break;
 
         case 'OFFRE_SUPPRIMEE':
-          // Offre supprimee
           this.handleOfferDeleted(data);
           break;
       }
 
-      // Mettre a jour l'historique des prix apres chaque evenement
       this.updatePriceHistory();
     },
 
     handleNewOffer(data) {
       if (!data) return;
 
-      // Normaliser les donnees du broker
       const normalizedData = {
         id: data.id,
         resourceType: data.resourceType,
@@ -111,11 +101,9 @@ export const useMarketplaceStore = defineStore('marketplace', {
         owner: data.owner
       };
 
-      // Verifier si l'offre existe deja
       const existingIndex = this.offers.findIndex(o => o.id === data.id);
       if (existingIndex >= 0) {
         const existing = this.offers[existingIndex];
-        // Ne pas ecraser avec des valeurs a 0 ou null si on a deja des bonnes valeurs
         this.offers[existingIndex] = {
           ...existing,
           resourceType: normalizedData.resourceType || existing.resourceType,
@@ -126,7 +114,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
           owner: normalizedData.owner || existing.owner
         };
       } else {
-        // Ajouter nouvelle offre
         this.offers.push(normalizedData);
       }
 
@@ -139,16 +126,13 @@ export const useMarketplaceStore = defineStore('marketplace', {
       const offerIndex = this.offers.findIndex(o => o.id === data.offerId);
       if (offerIndex >= 0) {
         const offer = this.offers[offerIndex];
-        // Reduire la quantite
         offer.quantity = Math.max(0, (offer.quantity || 0) - (data.quantity || 0));
 
-        // Si quantite = 0, supprimer l'offre
         if (offer.quantity <= 0) {
           this.offers.splice(offerIndex, 1);
         }
       }
 
-      // Rafraichir les ressources du joueur si c'est notre achat
       const playerStore = usePlayerStore();
       playerStore.fetchResources();
 
@@ -171,7 +155,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
       this.error = null;
 
       try {
-        // Utiliser le cache backend en priorite
         console.log('[MarketplaceStore] Fetching offers from cache...');
         const response = await cachedOffersApi.getAll();
         console.log('[MarketplaceStore] Cache response:', response.data);
@@ -182,7 +165,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
       } catch (cacheErr) {
         console.log('[MarketplaceStore] Cache unavailable:', cacheErr.message, 'trying external API');
 
-        // Fallback sur l'API externe
         try {
           const response = await marketplaceApi.getOffers();
           this.offers = response.data || [];
@@ -208,7 +190,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
         const response = await pricesApi.getAll();
         const data = response.data || {};
 
-        // L'API retourne deja un objet groupe par type: { BOISIUM: [...], FERONIUM: [...], ... }
         const historyByType = {};
 
         Object.entries(data).forEach(([resourceType, entries]) => {
@@ -255,13 +236,11 @@ export const useMarketplaceStore = defineStore('marketplace', {
 
           snapshots.push(snapshot);
 
-          // Ajouter a l'historique local
           if (!this.priceHistory[type]) {
             this.priceHistory[type] = [];
           }
           this.priceHistory[type].push(snapshot);
 
-          // Garder les 24 dernieres heures seulement
           const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
           this.priceHistory[type] = this.priceHistory[type].filter(
             h => new Date(h.timestamp).getTime() > oneDayAgo
@@ -269,7 +248,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
         }
       });
 
-      // Sauvegarder en DB (fire & forget)
       if (snapshots.length > 0) {
         pricesApi.saveBulk(snapshots).catch(err => {
           console.error('[MarketplaceStore] Error saving price history:', err);
@@ -277,7 +255,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
       }
     },
 
-    // Actions marketplace
     async createOffer(resourceType, quantity, unitPrice) {
       try {
         const payload = {
@@ -289,8 +266,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
         const response = await marketplaceApi.createOffer(payload);
         console.log('[MarketplaceStore] Create offer response:', response.data);
 
-        // Sauvegarder immediatement dans notre cache backend
-        // L'offre sera mise a jour via le sync API dans 2 minutes
         if (response.data && response.data.id) {
           const playerStore = usePlayerStore();
           const newOffer = {
@@ -304,12 +279,10 @@ export const useMarketplaceStore = defineStore('marketplace', {
           };
 
           console.log('[MarketplaceStore] Adding offer locally:', newOffer);
-          // Ajouter localement immediatement
           this.offers.push(newOffer);
           this.lastUpdate = new Date().toISOString();
           console.log('[MarketplaceStore] Total offers now:', this.offers.length, this.offers);
 
-          // Sauvegarder dans le cache backend (fire & forget)
           cachedOffersApi.saveOwn(newOffer).then(res => {
             console.log('[MarketplaceStore] Own offer cached successfully:', res.data);
           }).catch(err => {
@@ -330,7 +303,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
           pricePerResource: unitPrice
         });
 
-        // Mettre a jour localement immediatement
         const offerIndex = this.offers.findIndex(o => o.id === offerId);
         if (offerIndex >= 0) {
           this.offers[offerIndex].quantity = quantity;
@@ -339,7 +311,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
           this.offers[offerIndex].pricePerResource = unitPrice;
           this.lastUpdate = new Date().toISOString();
 
-          // Mettre a jour dans le cache backend
           cachedOffersApi.saveOwn({
             id: offerId,
             ...this.offers[offerIndex]
@@ -357,7 +328,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
     async deleteOffer(offerId) {
       try {
         await marketplaceApi.deleteOffer(offerId);
-        // La suppression sera reflétée via l'evenement broker OFFRE_SUPPRIMEE
       } catch (err) {
         throw err;
       }
@@ -366,7 +336,6 @@ export const useMarketplaceStore = defineStore('marketplace', {
     async purchase(offerId, quantity) {
       try {
         const response = await marketplaceApi.purchase(offerId, quantity);
-        // L'achat sera reflété via l'evenement broker ACHAT
         return response.data;
       } catch (err) {
         throw err;

@@ -4,7 +4,6 @@ import { broadcast } from '../ws.js';
 
 const router = express.Router();
 
-// Get current ship position for a game
 router.get('/:gameId', async (req, res) => {
   try {
     const pos = await ShipPosition.findOne({ gameId: req.params.gameId });
@@ -15,7 +14,6 @@ router.get('/:gameId', async (req, res) => {
   }
 });
 
-// Upsert ship position for a game
 router.put('/:gameId', async (req, res) => {
   try {
     const { x, y, type, zone } = req.body;

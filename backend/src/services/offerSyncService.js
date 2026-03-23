@@ -1,6 +1,5 @@
 import Offer from '../models/Offer.js';
 
-// Configuration
 const EXTERNAL_API_URL = process.env.EXTERNAL_API_URL || 'http://ec2-15-237-116-133.eu-west-3.compute.amazonaws.com:8443';
 const CODINGGAME_ID = process.env.CODINGGAME_ID || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjb2RpbmdnYW1lIiwic3ViIjoiZTQ2MmE1ZWItOWQxNi00M2Q2LTg4MTYtMzc2N2MzMzZiZjczIiwicm9sZXMiOlsiVVNFUiJdfQ.i4gq-3ey6r0m1BOQjGTcjhvONZe9UXmPJo8ojcMf-7k';
 const GAME_ID = process.env.GAME_ID || 'kuz-default';
@@ -16,10 +15,8 @@ class OfferSyncService {
   start() {
     console.log('[OfferSync] Starting sync service (interval: 2 minutes)');
 
-    // Sync immediatement au demarrage
     this.sync();
 
-    // Puis toutes les 2 minutes
     this.syncInterval = setInterval(() => {
       this.sync();
     }, SYNC_INTERVAL);
@@ -43,7 +40,6 @@ class OfferSyncService {
     console.log('[OfferSync] Starting sync...');
 
     try {
-      // Appeler l'API externe
       const response = await fetch(`${EXTERNAL_API_URL}/marketplace/offers`, {
         method: 'GET',
         headers: {
@@ -66,7 +62,6 @@ class OfferSyncService {
       const offers = await response.json();
       console.log(`[OfferSync] Received ${offers.length} offers from API`);
 
-      // Sync avec la DB
       const now = new Date();
       const syncedIds = [];
 
@@ -90,7 +85,6 @@ class OfferSyncService {
         );
       }
 
-      // Marquer les offres absentes comme supprimees
       const deleteResult = await Offer.updateMany(
         {
           gameId: GAME_ID,
@@ -113,7 +107,6 @@ class OfferSyncService {
     }
   }
 
-  // Mettre a jour depuis un evenement broker
   async handleBrokerEvent(eventType, data) {
     try {
       switch (eventType) {
@@ -138,11 +131,9 @@ class OfferSyncService {
     const newQuantity = data.quantityIn || data.quantity || 0;
     const newPrice = data.pricePerResource || data.unitPrice || 0;
 
-    // Verifier si l'offre existe deja
     const existing = await Offer.findOne({ gameId: GAME_ID, offerId: data.id });
 
     if (existing) {
-      // Ne pas ecraser avec des valeurs a 0 si on a deja des bonnes valeurs
       const updateData = {
         lastSyncAt: new Date(),
         deleted: false
@@ -159,7 +150,6 @@ class OfferSyncService {
       );
       console.log(`[OfferSync] Offer updated: ${data.id} (preserved existing values)`);
     } else {
-      // Nouvelle offre - creer avec les valeurs recues
       await Offer.create({
         gameId: GAME_ID,
         offerId: data.id,

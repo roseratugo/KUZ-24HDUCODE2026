@@ -3,7 +3,6 @@ import PriceHistory from '../models/PriceHistory.js';
 
 const router = express.Router();
 
-// Get price history for a game (all resources)
 router.get('/:gameId', async (req, res) => {
   try {
     const { hours = 24 } = req.query;
@@ -14,7 +13,6 @@ router.get('/:gameId', async (req, res) => {
       timestamp: { $gte: since }
     }).sort({ timestamp: -1 });
 
-    // Group by resource type
     const grouped = {
       BOISIUM: [],
       FERONIUM: [],
@@ -34,7 +32,6 @@ router.get('/:gameId', async (req, res) => {
       }
     });
 
-    // Reverse to get chronological order
     Object.keys(grouped).forEach(key => {
       grouped[key].reverse();
     });
@@ -45,7 +42,6 @@ router.get('/:gameId', async (req, res) => {
   }
 });
 
-// Get price history for a specific resource
 router.get('/:gameId/:resourceType', async (req, res) => {
   try {
     const { hours = 24 } = req.query;
@@ -70,7 +66,6 @@ router.get('/:gameId/:resourceType', async (req, res) => {
   }
 });
 
-// Save a price snapshot
 router.post('/', async (req, res) => {
   try {
     const { gameId, resourceType, avgPrice, minPrice, maxPrice, offerCount, totalQuantity } = req.body;
@@ -96,7 +91,6 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Bulk save price snapshots (all resources at once)
 router.post('/bulk', async (req, res) => {
   try {
     const { gameId, snapshots } = req.body;
@@ -124,7 +118,6 @@ router.post('/bulk', async (req, res) => {
   }
 });
 
-// Get latest prices for all resources
 router.get('/:gameId/latest/all', async (req, res) => {
   try {
     const latest = {};
@@ -153,7 +146,6 @@ router.get('/:gameId/latest/all', async (req, res) => {
   }
 });
 
-// Clear history for a game
 router.delete('/:gameId', async (req, res) => {
   try {
     const result = await PriceHistory.deleteMany({ gameId: req.params.gameId });

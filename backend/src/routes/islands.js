@@ -1,6 +1,5 @@
 import express from 'express';
 import Island from '../models/Island.js';
-import Cell from '../models/Cell.js';
 import { broadcast } from '../ws.js';
 
 const router = express.Router();

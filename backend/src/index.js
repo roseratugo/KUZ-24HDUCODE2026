@@ -25,12 +25,10 @@ app.use(express.json());
 mongoose.connect(MONGODB_URI)
   .then(() => {
     console.log('Connected to MongoDB');
-    // Demarrer le service de sync des offres
     offerSyncService.start();
   })
   .catch(err => console.error('MongoDB connection error:', err));
 
-// WebSocket servers (noServer pour gerer le routing manuellement)
 const brokerWss = new WebSocketServer({ noServer: true });
 const movesWss = new WebSocketServer({ noServer: true });
 
@@ -49,7 +47,6 @@ brokerWss.on('connection', (ws) => {
   });
 });
 
-// Router les connexions WebSocket vers le bon serveur
 server.on('upgrade', (request, socket, head) => {
   const { pathname } = new URL(request.url, `http://${request.headers.host}`);
 

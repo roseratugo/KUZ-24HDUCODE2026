@@ -4,7 +4,6 @@ import { useBrokerStore } from '../stores/broker';
 
 const brokerStore = useBrokerStore();
 
-// Expose pour usage externe (ex: bot)
 defineExpose({
   latestMessage: computed(() => brokerStore.latestMessage),
   messages: computed(() => brokerStore.messages),
@@ -113,7 +112,6 @@ const getEventColor = (type) => {
       {{ error }}
     </div>
 
-    <!-- Stats -->
     <div class="stats-row" v-if="brokerStore.messages.length > 0">
       <div
         v-for="(count, type) in stats"
@@ -128,7 +126,6 @@ const getEventColor = (type) => {
       </div>
     </div>
 
-    <!-- Messages -->
     <div class="messages-container">
       <div v-if="filteredMessages.length === 0" class="no-messages">
         <span class="no-msg-icon">📭</span>

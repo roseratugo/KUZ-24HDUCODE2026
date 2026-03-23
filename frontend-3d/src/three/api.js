@@ -48,7 +48,6 @@ export async function fetchResources() {
   return res.data;
 }
 
-// Marketplace
 export async function fetchOffers() {
   const res = await gameClient.get("/marketplace/offers");
   return res.data;
@@ -69,7 +68,6 @@ export async function deleteOffer(offerId) {
   return res.data;
 }
 
-// Thefts
 export async function fetchThefts() {
   const res = await gameClient.get("/thefts");
   return res.data;
@@ -80,7 +78,6 @@ export async function launchTheft(resourceType, moneySpent) {
   return res.data;
 }
 
-// Bot
 export async function botStart() {
   const res = await client.post('/bot/start');
   return res.data;

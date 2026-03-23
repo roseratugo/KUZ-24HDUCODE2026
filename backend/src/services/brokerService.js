@@ -1,22 +1,19 @@
 import amqp from 'amqplib';
 import { offerSyncService } from './offerSyncService.js';
 
-// Configuration par defaut du broker AMQPS
 const DEFAULT_BROKER_HOST = process.env.BROKER_HOST || 'b-a5095b9b-3c4d-4fe7-8df1-8031e8808618.mq.eu-west-3.on.aws';
 const DEFAULT_BROKER_PORT = process.env.BROKER_PORT || 5671;
 
-// Types d'evenements marketplace
 const MARKETPLACE_EVENTS = ['ACHAT', 'OFFRE', 'OFFRE_SUPPRIMEE'];
 
 class BrokerService {
   constructor() {
-    this.wsClients = new Map(); // Map<ws, { connection, channel, playerId, username }>
+    this.wsClients = new Map();
   }
 
   addClient(ws) {
     console.log('[Broker] Client WebSocket connecte');
 
-    // Envoyer le statut initial
     this.sendToClient(ws, {
       type: 'status',
       status: 'ws_ready',
@@ -24,7 +21,6 @@ class BrokerService {
       timestamp: new Date().toISOString()
     });
 
-    // Ecouter les messages du client
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString());
@@ -54,7 +50,6 @@ class BrokerService {
   }
 
   async connectToBroker(ws, username, password, playerId) {
-    // Fermer une connexion existante si presente
     if (this.wsClients.has(ws)) {
       await this.disconnectClient(ws);
     }
@@ -71,19 +66,15 @@ class BrokerService {
 
     const queue = `user.${playerId}`;
 
-    // Construction de l'URL AMQPS comme dans le code de reference
-    // Note: pas d'encodage URL, comme dans le code de reference
     const url = `amqps://${username}:${password}@${DEFAULT_BROKER_HOST}:${DEFAULT_BROKER_PORT}/`;
 
     try {
-      // Connexion avec amqplib
       const connection = await amqp.connect(url, {
         rejectUnauthorized: false
       });
 
       console.log(`[Broker] Connexion AMQPS etablie pour ${username}`);
 
-      // Gestion des evenements de connexion
       connection.on('error', (err) => {
         console.error(`[Broker] Erreur connexion pour ${username}:`, err.message);
         this.sendToClient(ws, {
@@ -104,12 +95,10 @@ class BrokerService {
         this.wsClients.delete(ws);
       });
 
-      // Creer le channel
       const channel = await connection.createChannel();
 
       console.log(`[Broker] Channel cree, ecoute sur ${queue}`);
 
-      // Consommer les messages de la queue
       channel.consume(queue, (msg) => {
         if (msg) {
           try {
@@ -130,22 +119,18 @@ class BrokerService {
               timestamp: new Date().toISOString()
             });
 
-            // Notifier le service de sync pour les evenements marketplace
             if (parsed && parsed.type && MARKETPLACE_EVENTS.includes(parsed.type)) {
               offerSyncService.handleBrokerEvent(parsed.type, parsed.message);
             }
 
-            // Acquitter le message
             channel.ack(msg);
           } catch (err) {
             console.error('[Broker] Erreur traitement message:', err);
-            // Acquitter quand meme pour eviter les messages bloques
             channel.ack(msg);
           }
         }
       });
 
-      // Stocker les references
       this.wsClients.set(ws, { connection, channel, playerId, username });
 
       this.sendToClient(ws, {
@@ -189,11 +174,9 @@ class BrokerService {
   }
 
   sendToClient(ws, data) {
-    if (ws.readyState === 1) { // WebSocket.OPEN
+    if (ws.readyState === 1)
       ws.send(JSON.stringify(data));
     }
   }
-}
 
-// Singleton
 export const brokerService = new BrokerService();
