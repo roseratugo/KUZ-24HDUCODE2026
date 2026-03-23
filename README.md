@@ -24,6 +24,20 @@ En l'an 3026, 404 ans après la frappe de l'astéroïde "status-302", la Terre s
 
 Le sujet a été proposé par la **MMA Covéa Le Mans** lors des 24H DU CODE 2026.
 
+## Images
+
+### IHM
+
+![IHM](./.github/assets/IHM-3d.png)
+
+### Interface 3D
+
+![Interface 3D](./.github/assets/interface-3d.png)
+
+### Map
+
+![Map](./.github/assets/map.png)
+
 ### Objectifs
 
 - Cartographier le monde en explorant les centaines d'îles de la carte
