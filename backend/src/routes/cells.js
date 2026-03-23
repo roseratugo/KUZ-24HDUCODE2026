@@ -1,9 +1,26 @@
+/**
+ * Routes REST pour les cellules de la carte
+ *
+ * Chaque case de la carte du jeu est une "cellule" avec des coordonnees (x, y)
+ * et un type : SEA (ocean) ou SAND (plage = partie d'une ile).
+ * Le bot decouvre des cellules en se deplacant et les envoie ici pour les persister.
+ *
+ * Endpoints :
+ * GET    /api/cells?gameId=         → toutes les cellules d'une partie
+ * GET    /api/cells/bounds?gameId=  → limites min/max de la carte (pour le zoom)
+ * POST   /api/cells/bulk            → insert/update en masse (utilise par le bot)
+ * PATCH  /api/cells/state           → changer l'etat d'un lot de cellules
+ * DELETE /api/cells?gameId=         → supprimer toutes les cellules d'une partie
+ */
+
 import express from 'express';
 import Cell from '../models/Cell.js';
 import { broadcast } from '../ws.js';
 
 const router = express.Router();
 
+// Recuperer toutes les cellules d'une partie
+// .lean() retourne des objets JS bruts au lieu d'instances Mongoose (plus rapide, moins de memoire)
 router.get('/', async (req, res) => {
   try {
     const { gameId } = req.query;
@@ -18,6 +35,8 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Calculer les limites de la carte exploree (min/max des coordonnees)
+// Utilise par le frontend pour centrer la vue sur la zone exploree
 router.get('/bounds', async (req, res) => {
   try {
     const { gameId } = req.query;
@@ -25,6 +44,7 @@ router.get('/bounds', async (req, res) => {
       return res.status(400).json({ error: 'gameId is required' });
     }
 
+    // On ne recupere que x et y pour minimiser le transfert de donnees
     const cells = await Cell.find({ gameId }).select('x y').lean();
 
     if (cells.length === 0) {
@@ -46,6 +66,22 @@ router.get('/bounds', async (req, res) => {
   }
 });
 
+/**
+ * Insertion/mise a jour en masse de cellules (bulk upsert)
+ *
+ * C'est l'endpoint le plus appele du backend : le bot l'utilise apres chaque deplacement
+ * pour envoyer les nouvelles cellules decouvertes.
+ *
+ * Le bulkWrite envoie toutes les operations en UNE seule requete MongoDB,
+ * ce qui est beaucoup plus performant que de faire un save() par cellule.
+ *
+ * L'upsert: true fait que :
+ * - Si la cellule n'existe pas → elle est creee (INSERT)
+ * - Si elle existe deja → elle est mise a jour (UPDATE)
+ *
+ * $set met a jour les champs a chaque passage (lastSeenAt, type, etc.)
+ * $setOnInsert ne s'execute qu'au premier insert (discoveredAt, state initial)
+ */
 router.post('/bulk', async (req, res) => {
   try {
     const { gameId, cells } = req.body;
@@ -78,6 +114,7 @@ router.post('/bulk', async (req, res) => {
 
     const result = await Cell.bulkWrite(operations);
 
+    // Notifie tous les frontends connectes en WebSocket que de nouvelles cellules sont disponibles
     broadcast('cells:update', { gameId, cells });
 
     res.json({
@@ -90,6 +127,7 @@ router.post('/bulk', async (req, res) => {
   }
 });
 
+// Changer l'etat de plusieurs cellules d'un coup (ex: SEEN → KNOWN)
 router.patch('/state', async (req, res) => {
   try {
     const { gameId, cells, state } = req.body;
@@ -100,6 +138,7 @@ router.patch('/state', async (req, res) => {
 
     const coordinates = cells.map(c => ({ x: c.x, y: c.y }));
 
+    // $or permet de matcher plusieurs cellules par leurs coordonnees en une seule requete
     const result = await Cell.updateMany(
       {
         gameId,
@@ -117,6 +156,7 @@ router.patch('/state', async (req, res) => {
   }
 });
 
+// Supprimer toutes les cellules d'une partie (reset)
 router.delete('/', async (req, res) => {
   try {
     const { gameId } = req.query;

@@ -1,3 +1,18 @@
+/**
+ * DolphinManager — Dauphins qui sautent autour du bateau
+ *
+ * 6 dauphins nagent dans un rayon de 200 unites autour du bateau.
+ * Chaque dauphin avance en ligne droite et fait des sauts paraboliques periodiques.
+ *
+ * Physique du saut :
+ * - Arc parabolique : hauteur = 4 * t * (1-t) * jumpHeight (max au milieu)
+ * - Pendant le saut : pitch (rotation X) simule le nez en l'air puis la plongee
+ * - Hors du saut : le dauphin est legerement sous l'eau
+ *
+ * Quand un dauphin s'eloigne trop (>350u), il se teleporte a 80-180u du bateau
+ * avec une direction qui pointe vers le bateau.
+ */
+
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";

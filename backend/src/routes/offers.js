@@ -1,8 +1,40 @@
+/**
+ * Routes REST pour les offres marketplace
+ *
+ * La marketplace permet aux joueurs d'echanger des ressources.
+ * Chaque equipe ne produit qu'une seule des 3 ressources primaires
+ * (Boisium, Feronium ou Charbonium), le commerce est donc indispensable.
+ *
+ * Les offres sont maintenues a jour par deux sources :
+ * - OfferSyncService (polling API du jeu toutes les 2 min)
+ * - Evenements broker AMQP (temps reel)
+ *
+ * Les offres supprimees ne sont pas effacees de la BDD mais marquees deleted: true
+ * (soft delete) pour garder l'historique.
+ *
+ * Note : l'API du jeu utilise des noms de champs differents de notre BDD
+ * (quantityIn vs quantity, pricePerResource vs unitPrice) → on normalise dans les reponses.
+ *
+ * Endpoints :
+ * GET  /api/offers/:gameId                    → toutes les offres actives
+ * GET  /api/offers/:gameId/:resourceType      → offres filtrees par ressource
+ * POST /api/offers/:gameId/sync               → sync complete (bulk upsert)
+ * POST /api/offers/:gameId/broker/offer       → upsert une offre (evenement broker)
+ * POST /api/offers/:gameId/broker/purchase    → traite un achat (decremente quantite)
+ * POST /api/offers/:gameId/broker/delete      → soft delete une offre
+ * POST /api/offers/:gameId/own                → cree/modifie notre propre offre
+ * GET  /api/offers/:gameId/status             → derniere sync + nombre d'offres actives
+ */
+
 import express from "express";
 import Offer from "../models/Offer.js";
 
 const router = express.Router();
 
+// Toutes les offres actives, triees par prix unitaire croissant
+// Les offres supprimees (deleted: true) sont filtrees
+// Le format de reponse inclut les deux noms de champs (quantityIn/quantity, etc.)
+// pour etre compatible avec les differents frontends
 router.get("/:gameId", async (req, res) => {
   try {
     const offers = await Offer.find({
@@ -28,6 +60,7 @@ router.get("/:gameId", async (req, res) => {
   }
 });
 
+// Offres filtrees par type de ressource (BOISIUM, FERONIUM, CHARBONIUM)
 router.get("/:gameId/:resourceType", async (req, res) => {
   try {
     const offers = await Offer.find({
@@ -54,6 +87,16 @@ router.get("/:gameId/:resourceType", async (req, res) => {
   }
 });
 
+/**
+ * Synchronisation complete des offres
+ *
+ * Recoit un tableau d'offres et :
+ * 1. Upsert chaque offre (cree ou met a jour)
+ * 2. Marque comme deleted les offres en base qui ne sont plus dans le tableau
+ *    (elles ont ete supprimees/expirees depuis la derniere sync)
+ *
+ * C'est le meme principe que OfferSyncService.sync() mais expose en endpoint REST
+ */
 router.post("/:gameId/sync", async (req, res) => {
   try {
     const { offers } = req.body;
@@ -86,6 +129,7 @@ router.post("/:gameId/sync", async (req, res) => {
       );
     }
 
+    // $nin = "not in" : toutes les offres dont l'ID n'est pas dans syncedIds
     await Offer.updateMany(
       {
         gameId,
@@ -107,6 +151,7 @@ router.post("/:gameId/sync", async (req, res) => {
   }
 });
 
+// Upsert une offre a partir d'un evenement broker AMQP
 router.post("/:gameId/broker/offer", async (req, res) => {
   try {
     const { offer } = req.body;
@@ -137,6 +182,8 @@ router.post("/:gameId/broker/offer", async (req, res) => {
   }
 });
 
+// Traiter un achat : decremente la quantite de l'offre
+// Si la quantite tombe a 0 ou moins → soft delete
 router.post("/:gameId/broker/purchase", async (req, res) => {
   try {
     const { offerId, quantity } = req.body;
@@ -166,6 +213,7 @@ router.post("/:gameId/broker/purchase", async (req, res) => {
   }
 });
 
+// Soft delete d'une offre (quand le vendeur la retire)
 router.post("/:gameId/broker/delete", async (req, res) => {
   try {
     const { offerId } = req.body;
@@ -186,6 +234,7 @@ router.post("/:gameId/broker/delete", async (req, res) => {
   }
 });
 
+// Creer/modifier notre propre offre (isOwn: true pour la differencier des autres)
 router.post("/:gameId/own", async (req, res) => {
   try {
     const { offer } = req.body;
@@ -206,7 +255,7 @@ router.post("/:gameId/own", async (req, res) => {
         unitPrice: offer.pricePerResource || offer.unitPrice || 0,
         lastSyncAt: new Date(),
         deleted: false,
-        isOwn: true,
+        isOwn: true, // Flag pour identifier notre propre offre dans le dashboard
       },
       { upsert: true, new: true },
     );
@@ -218,6 +267,7 @@ router.post("/:gameId/own", async (req, res) => {
   }
 });
 
+// Etat de la synchronisation : derniere date de sync + nombre d'offres actives
 router.get("/:gameId/status", async (req, res) => {
   try {
     const lastOffer = await Offer.findOne({ gameId: req.params.gameId }).sort({
