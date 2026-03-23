@@ -1,5 +1,3 @@
-import { WebSocketServer } from 'ws';
-
 let wss = null;
 
 export function setupWebSocket(existingWss) {

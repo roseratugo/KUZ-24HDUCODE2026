@@ -22,7 +22,6 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// URLs to exclude from history (auto-refresh endpoints)
 const excludeFromHistory = ['/players/details', '/resources'];
 
 const shouldLogToHistory = (url) => {
@@ -48,7 +47,6 @@ apiClient.interceptors.response.use(
   (error) => {
     const duration = error.config?.metadata ? Date.now() - error.config.metadata.startTime : null;
 
-    // Debug: log complet de l'erreur
     console.error(`[API Error] ${error.config?.method?.toUpperCase()} ${error.config?.url}`, {
       status: error.response?.status || 'No response',
       responseData: error.response?.data,

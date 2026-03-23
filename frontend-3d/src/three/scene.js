@@ -23,7 +23,6 @@ export class GameScene {
   }
 
   init() {
-    // Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -31,15 +30,12 @@ export class GameScene {
     this.renderer.toneMappingExposure = 0.8;
     this.container.appendChild(this.renderer.domElement);
 
-    // Scene
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x8eafc1, 200, 800);
 
-    // Camera
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 1500);
     this.camera.position.set(30, 40, 100);
 
-    // Controls
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.maxPolarAngle = Math.PI * 0.45;
     this.controls.minDistance = 10;
@@ -47,10 +43,8 @@ export class GameScene {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
 
-    // Sun
     this.sun = new THREE.Vector3();
 
-    // Water (sized to fog far distance, not overkill)
     const waterGeometry = new THREE.PlaneGeometry(2000, 2000);
     this.water = new Water(waterGeometry, {
       textureWidth: 512,
@@ -71,7 +65,6 @@ export class GameScene {
     this.water.position.y = 0;
     this.scene.add(this.water);
 
-    // Sky
     this.sky = new Sky();
     this.sky.scale.setScalar(10000);
     this.scene.add(this.sky);
@@ -84,7 +77,6 @@ export class GameScene {
 
     this.updateSun();
 
-    // Lights
     const ambientLight = new THREE.AmbientLight(0x6688aa, 1.5);
     this.scene.add(ambientLight);
 
@@ -92,36 +84,30 @@ export class GameScene {
     directionalLight.position.set(50, 100, 50);
     this.scene.add(directionalLight);
 
-    // Ship physics — smooth interpolation between server updates
-    this.targetBoatPos = new THREE.Vector3(0, 11, 0);   // current server target
-    this.prevTargetPos = new THREE.Vector3(0, 11, 0);    // previous server target
-    this.smoothedTarget = new THREE.Vector3(0, 11, 0);   // interpolated target (what we actually chase)
-    this.boatVelocity = new THREE.Vector3(0, 0, 0);     // estimated velocity from server updates
+    this.targetBoatPos = new THREE.Vector3(0, 11, 0);
+    this.prevTargetPos = new THREE.Vector3(0, 11, 0);
+    this.smoothedTarget = new THREE.Vector3(0, 11, 0);
+    this.boatVelocity = new THREE.Vector3(0, 0, 0);
     this.boatHeading = 0;
     this.targetHeading = 0;
-    this.lastUpdateTime = 0;       // timestamp of last server update
-    this.updateInterval = 0.2;     // estimated interval between server updates (seconds)
-    this.interpProgress = 1;       // 0..1 progress between prev and current target
+    this.lastUpdateTime = 0;
+    this.updateInterval = 0.2;
+    this.interpProgress = 1;
 
-    // Pre-allocated vectors for animate() to avoid per-frame GC
     this._toTarget = new THREE.Vector3();
     this._scenePos = new THREE.Vector3();
     this._predicted = new THREE.Vector3();
 
-    // Islands
     this.islandManager = new IslandManager(this.scene, this.CELL_SIZE);
 
-    // Birds
     this.birdManager = new BirdManager(this.scene);
     this._birdsSpawned = false;
 
-    // Dolphins
     this.dolphinManager = new DolphinManager(this.scene);
     this._dolphinsSpawned = false;
 
-    // Boat backflip (Y key)
-    this._jumpTimer = -1;       // -1 = not jumping
-    this._jumpTotalDuration = 3.0; // total animation time
+    this._jumpTimer = -1;
+    this._jumpTotalDuration = 3.0;
     this._jumpHeight = 18;
     this._diveDepth = 5;
     this._onKeyDown = (e) => {
@@ -129,7 +115,6 @@ export class GameScene {
     };
     window.addEventListener('keydown', this._onKeyDown);
 
-    // Resize
     this._onResize = () => this.onResize();
     window.addEventListener('resize', this._onResize);
   }
@@ -142,7 +127,6 @@ export class GameScene {
 
     } catch (err) {
       console.error('Ship model load failed, using fallback');
-      // Fallback: simple box
       const geo = new THREE.BoxGeometry(4, 2, 8);
       const mat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
       this.boat = new THREE.Mesh(geo, mat);
@@ -174,20 +158,16 @@ export class GameScene {
 
     const now = performance.now() / 1000;
 
-    // Save previous target before overwriting
     this.prevTargetPos.copy(this.targetBoatPos);
 
-    // Estimate update interval from actual timing
     if (this.lastUpdateTime > 0) {
       const dt = now - this.lastUpdateTime;
       if (dt > 0.01 && dt < 2) {
-        // Smooth the interval estimate
         this.updateInterval = this.updateInterval * 0.7 + dt * 0.3;
       }
     }
     this.lastUpdateTime = now;
 
-    // Compute velocity and heading from position delta
     if (moved) {
       const dx = scenePos.x - this.prevTargetPos.x;
       const dz = scenePos.z - this.prevTargetPos.z;
@@ -197,7 +177,6 @@ export class GameScene {
       this.boatVelocity.set(0, 0, 0);
     }
 
-    // Set the new target and reset interpolation progress
     this.targetBoatPos.set(scenePos.x, 11, scenePos.z);
     this.interpProgress = 0;
 
@@ -205,7 +184,6 @@ export class GameScene {
       this.refreshNearbyIslands();
     }
 
-    // Spawn dolphins around the boat
     this._trySpawnDolphins(scenePos.x, scenePos.z);
   }
 
@@ -245,13 +223,11 @@ export class GameScene {
       }
     }
 
-    // Spawn birds above islands when layout changes
     this._trySpawnBirds(prevHash);
   }
 
   _trySpawnBirds(prevHash) {
     if (!this.birdManager.ready) {
-      // Retry once the model is loaded
       if (!this._birdRetry) {
         this._birdRetry = setInterval(() => {
           if (this.birdManager.ready) {
@@ -263,7 +239,6 @@ export class GameScene {
       }
       return;
     }
-    // Only respawn if island layout actually changed
     if (this.islandManager.lastHash !== prevHash) {
       this._spawnBirdsForIslands();
     }
@@ -276,8 +251,6 @@ export class GameScene {
       const cells = clusters[i];
       if (cells.length < 3) continue;
 
-      // Only spawn birds on real islands (cells with island data)
-      // Check if any cell in the cluster belongs to a known island
       let isRealIsland = false;
       for (const c of cells) {
         const stored = this.cells.get(`${c.x},${c.y}`);
@@ -288,7 +261,6 @@ export class GameScene {
       }
       if (!isRealIsland) continue;
 
-      // Compute island center in scene coords
       let sumX = 0, sumY = 0;
       for (const c of cells) { sumX += c.x; sumY += c.y; }
       const cx = (sumX / cells.length) * this.CELL_SIZE;
@@ -315,7 +287,6 @@ export class GameScene {
       }
     });
 
-    // Only send nearby SAND cells to island manager
     this.islandManager.setShipPosition(sx, sy, RENDER_RADIUS);
     for (const [, cell] of this.cells) {
       if (cell.type !== 'SAND') continue;
@@ -328,7 +299,7 @@ export class GameScene {
   }
 
   triggerJump() {
-    if (this._jumpTimer >= 0) return; // already jumping
+    if (this._jumpTimer >= 0) return;
     this._jumpTimer = 0;
   }
 
@@ -343,28 +314,21 @@ export class GameScene {
     this.elapsedTime = (this.elapsedTime || 0) + delta;
     const time = this.elapsedTime;
 
-    // Water animation
     this.water.material.uniforms['time'].value = time;
 
     if (this.boat) {
-      // --- Smooth target interpolation between server updates ---
-      // Advance interpolation progress based on expected update interval
       this.interpProgress = Math.min(1, this.interpProgress + delta / this.updateInterval);
 
-      // Smoothstep easing for natural acceleration/deceleration
       const t = this.interpProgress;
       const ease = t * t * (3 - 2 * t);
 
-      // Interpolate between previous and current target
       this.smoothedTarget.lerpVectors(this.prevTargetPos, this.targetBoatPos, ease);
 
-      // Add velocity-based prediction to overshoot slightly for fluid motion
-      const prediction = Math.max(0, (t - 0.5) * 0.3); // gentle extrapolation in 2nd half
+      const prediction = Math.max(0, (t - 0.5) * 0.3);
       this._predicted.copy(this.boatVelocity).multiplyScalar(prediction * this.updateInterval);
       this.smoothedTarget.add(this._predicted);
-      this.smoothedTarget.y = 11; // keep Y locked
+      this.smoothedTarget.y = 11;
 
-      // --- Position: smooth chase toward the interpolated target ---
       const toTarget = this._toTarget.set(
         this.smoothedTarget.x - this.boat.position.x,
         0,
@@ -372,22 +336,18 @@ export class GameScene {
       );
       const distToTarget = toTarget.length();
 
-      // Smooth movement toward target
       const lerpSpeed = 1 - Math.pow(0.005, delta);
       this.boat.position.x += (this.smoothedTarget.x - this.boat.position.x) * lerpSpeed;
       this.boat.position.z += (this.smoothedTarget.z - this.boat.position.z) * lerpSpeed;
 
-      // Smooth turn (targetHeading updated only on server position change)
       let headingDiff = this.targetHeading - this.boatHeading;
       while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
-      // Use YXZ Euler order: heading (Y) first, then pitch/backflip (X), then roll (Z)
       this.boat.rotation.order = 'YXZ';
       this.boat.rotation.y = this.boatHeading;
 
-      // Backflip animation (Y key)
       let jumpY = 0;
       let flipAngle = 0;
       let isFlipping = false;
@@ -407,7 +367,6 @@ export class GameScene {
             jumpY = -this._diveDepth * Math.sin(p * Math.PI);
           }
 
-          // Backflip on X axis (pitch axis in YXZ order = lateral axis)
           if (t < 0.1) {
             const p = t / 0.1;
             flipAngle = p * p * 0.2;
@@ -425,7 +384,6 @@ export class GameScene {
         }
       }
 
-      // Apply: X = pitch/backflip (lateral axis), Z = roll (forward axis)
       const speed = Math.min(1, distToTarget);
       if (isFlipping) {
         this.boat.rotation.x = flipAngle;
@@ -436,19 +394,15 @@ export class GameScene {
         this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, 0, 1 - Math.pow(0.005, delta));
       }
 
-      // Bobbing + jump
       this.boat.position.y = 11 + Math.sin(time * 1.5) * 0.3 + Math.sin(time * 2.3) * 0.1 + jumpY;
 
-      // Water follows the boat so it's always visible
       this.water.position.x = this.boat.position.x;
       this.water.position.z = this.boat.position.z;
 
-      // Camera follow — smoother
       const camSpeed = 1 - Math.pow(0.05, delta);
       this.controls.target.lerp(this.boat.position, camSpeed);
     }
 
-    // Birds & Dolphins
     this.birdManager.update(delta, time);
     this.dolphinManager.update(delta, time);
 

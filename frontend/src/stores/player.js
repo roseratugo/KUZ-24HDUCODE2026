@@ -30,13 +30,11 @@ export const usePlayerStore = defineStore('player', {
         const response = await playerApi.getDetails();
         this.details = response.data;
 
-        // Sync ship data from player details
         if (response.data.ship) {
           const shipStore = useShipStore();
           shipStore.updateFromPlayerDetails(response.data.ship);
         }
 
-        // Sync island states to local DB
         if (response.data.discoveredIslands?.length) {
           const mapStore = useMapStore();
           if (mapStore.islands.size === 0) {

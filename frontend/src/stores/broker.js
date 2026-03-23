@@ -4,7 +4,7 @@ import { CREDENTIALS } from '../api/config';
 export const useBrokerStore = defineStore('broker', {
   state: () => ({
     ws: null,
-    connectionStatus: 'disconnected', // disconnected, connecting, ws_ready, connected, error
+    connectionStatus: 'disconnected',
     error: null,
     messages: [],
     maxMessages: 100,
@@ -12,7 +12,6 @@ export const useBrokerStore = defineStore('broker', {
     maxReconnectAttempts: 10,
     reconnectDelay: 5000,
     reconnectTimeout: null,
-    // Derniers evenements par type pour acces rapide
     lastEvents: {
       ACHAT: null,
       OFFRE: null,
@@ -20,7 +19,6 @@ export const useBrokerStore = defineStore('broker', {
       DISCOVERED_ISLAND: null,
       VOL: null
     },
-    // Listeners pour les evenements (autres stores peuvent s'abonner)
     eventListeners: []
   }),
 
@@ -118,7 +116,6 @@ export const useBrokerStore = defineStore('broker', {
       const eventType = eventData.type;
       const eventMessage = eventData.message;
 
-      // Stocker dans l'historique
       this.messages.unshift({
         id: Date.now(),
         type: eventType,
@@ -126,12 +123,10 @@ export const useBrokerStore = defineStore('broker', {
         timestamp: new Date().toISOString()
       });
 
-      // Limiter la taille
       if (this.messages.length > this.maxMessages) {
         this.messages = this.messages.slice(0, this.maxMessages);
       }
 
-      // Stocker le dernier evenement par type
       if (this.lastEvents.hasOwnProperty(eventType)) {
         this.lastEvents[eventType] = {
           data: eventMessage,
@@ -139,16 +134,13 @@ export const useBrokerStore = defineStore('broker', {
         };
       }
 
-      // Notifier les listeners
       this.notifyListeners(eventType, eventMessage);
     },
 
-    // Permet aux autres stores de s'abonner aux evenements
     subscribe(eventTypes, callback) {
       const listener = { eventTypes, callback };
       this.eventListeners.push(listener);
 
-      // Retourne une fonction pour se desabonner
       return () => {
         const index = this.eventListeners.indexOf(listener);
         if (index > -1) {
@@ -192,7 +184,7 @@ export const useBrokerStore = defineStore('broker', {
         this.reconnectTimeout = null;
       }
 
-      this.reconnectAttempts = this.maxReconnectAttempts; // Empecher reconnexion auto
+      this.reconnectAttempts = this.maxReconnectAttempts;
 
       if (this.ws) {
         if (this.ws.readyState === WebSocket.OPEN) {

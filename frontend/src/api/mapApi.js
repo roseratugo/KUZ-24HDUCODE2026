@@ -98,7 +98,6 @@ export const pricesApi = {
   clearAll: () => mapClient.delete(`/prices/${GAME_ID}`)
 };
 
-// API pour les offres cached (depuis notre backend)
 export const cachedOffersApi = {
   getAll: () => mapClient.get(`/offers/${GAME_ID}`),
 
@@ -107,7 +106,6 @@ export const cachedOffersApi = {
 
   getStatus: () => mapClient.get(`/offers/${GAME_ID}/status`),
 
-  // Sauvegarder une offre creee par nous (avant sync API)
   saveOwn: (offer) => mapClient.post(`/offers/${GAME_ID}/own`, { offer })
 };
 

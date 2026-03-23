@@ -124,12 +124,10 @@ export const useShipStore = defineStore('ship', {
 
         this.moveHistory.push(moveRecord);
 
-        // Save move to DB (fire and forget)
         movesApi.save(moveRecord).catch(err => {
           console.error('Failed to save move to DB:', err);
         });
 
-        // Save position to DB (fire and forget)
         if (data.position) {
           shipPositionApi.save(data.position).catch(err => {
             console.error('Failed to save ship position to DB:', err);
@@ -208,20 +206,16 @@ export const useShipStore = defineStore('ship', {
     },
 
     updateFromPlayerDetails(shipData) {
-      // Update energy from availableMove
       if (shipData.availableMove !== undefined) {
         this.energy = shipData.availableMove;
       }
-      // Update ship level info
       if (shipData.level) {
         this.shipLevel = shipData.level;
         this.maxEnergy = shipData.level.maxMovement || 15;
       }
-      // Update lastMoveAt from API
       if (shipData.lastMoveAt) {
         const apiLastMove = new Date(shipData.lastMoveAt).getTime();
         const localLastMove = this.lastMoveAt ? new Date(this.lastMoveAt).getTime() : 0;
-        // Only update if API has more recent move
         if (apiLastMove > localLastMove) {
           this.lastMoveAt = shipData.lastMoveAt;
           const elapsed = Date.now() - apiLastMove;
@@ -270,7 +264,6 @@ export const useShipStore = defineStore('ship', {
           saveToStorage(this);
         }
       } catch (err) {
-        // 404 = pas encore de position enregistrée, pas une erreur critique
         if (err.response?.status !== 404) {
           console.error('Failed to load ship position from DB:', err);
         }

@@ -2,10 +2,8 @@ import { Router } from 'express';
 
 const router = Router();
 
-// URL du bot Python (dans Docker, utilise le nom du service)
 const BOT_PYTHON_URL = process.env.BOT_PYTHON_URL || 'http://bot-python:3002';
 
-// Helper pour faire des requêtes vers le bot Python
 async function proxyToBot(method, path, body = null) {
   const options = {
     method,
@@ -19,7 +17,6 @@ async function proxyToBot(method, path, body = null) {
   return response.json();
 }
 
-// Start the bot
 router.post('/start', async (req, res) => {
   try {
     const result = await proxyToBot('POST', '/bot/start');
@@ -29,7 +26,6 @@ router.post('/start', async (req, res) => {
   }
 });
 
-// Stop the bot
 router.post('/stop', async (req, res) => {
   try {
     const result = await proxyToBot('POST', '/bot/stop');
@@ -39,7 +35,6 @@ router.post('/stop', async (req, res) => {
   }
 });
 
-// Pause the bot
 router.post('/pause', async (req, res) => {
   try {
     const result = await proxyToBot('POST', '/bot/pause');
@@ -49,7 +44,6 @@ router.post('/pause', async (req, res) => {
   }
 });
 
-// Resume the bot
 router.post('/resume', async (req, res) => {
   try {
     const result = await proxyToBot('POST', '/bot/resume');
@@ -59,7 +53,6 @@ router.post('/resume', async (req, res) => {
   }
 });
 
-// Get bot status
 router.get('/status', async (req, res) => {
   try {
     const result = await proxyToBot('GET', '/bot/status');
@@ -69,7 +62,6 @@ router.get('/status', async (req, res) => {
   }
 });
 
-// Get bot logs
 router.get('/logs', async (req, res) => {
   try {
     const since = req.query.since || 0;
@@ -80,7 +72,6 @@ router.get('/logs', async (req, res) => {
   }
 });
 
-// Clear bot logs
 router.delete('/logs', async (req, res) => {
   try {
     const result = await proxyToBot('DELETE', '/bot/logs');

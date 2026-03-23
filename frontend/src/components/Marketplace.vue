@@ -38,10 +38,8 @@ const showCreateForm = ref(false);
 const editingOffer = ref(null);
 const selectedResource = ref('BOISIUM');
 
-// Utiliser les donnees du store
 const offers = computed(() => marketplaceStore.offers);
 const priceHistory = computed(() => {
-  // Convertir le format du store pour le graphique
   const history = {};
   for (const type of ['BOISIUM', 'FERONIUM', 'CHARBONIUM']) {
     const storeHistory = marketplaceStore.priceHistory[type] || [];
@@ -70,7 +68,6 @@ const resourceConfig = {
   CHARBONIUM: { color: '#525252', bgColor: 'rgba(82, 82, 82, 0.2)', chartColor: 'rgb(82, 82, 82)', icon: '⬛', label: 'Charbonium' }
 };
 
-// Status broker pour affichage
 const brokerConnected = computed(() => brokerStore.isConnected);
 const lastUpdate = computed(() => marketplaceStore.lastUpdate);
 
@@ -78,10 +75,8 @@ const playerName = computed(() => playerStore.details?.name || '');
 const playerId = computed(() => playerStore.details?.id || '');
 const playerMoney = computed(() => playerStore.details?.money || 0);
 
-// Comparer par ID ou par name selon le format de owner
 const isMyOffer = (offer) => {
   if (!offer.owner) return false;
-  // owner peut etre un objet {id, name} ou juste un string ID
   const ownerId = typeof offer.owner === 'object' ? offer.owner.id : offer.owner;
   const ownerName = typeof offer.owner === 'object' ? offer.owner.name : null;
   return ownerId === playerId.value || ownerName === playerName.value;
@@ -90,7 +85,6 @@ const isMyOffer = (offer) => {
 const myOffers = computed(() => offers.value.filter(isMyOffer));
 const otherOffers = computed(() => offers.value.filter(o => !isMyOffer(o)));
 
-// Stats par ressource
 const resourceStats = computed(() => {
   const stats = {};
   for (const type of ['BOISIUM', 'FERONIUM', 'CHARBONIUM']) {
@@ -109,12 +103,10 @@ const resourceStats = computed(() => {
   return stats;
 });
 
-// Offres filtrees par ressource selectionnee
 const filteredOffers = computed(() => {
   return otherOffers.value.filter(o => o.resourceType === selectedResource.value);
 });
 
-// Chart.js configuration
 const chartData = computed(() => {
   const history = priceHistory.value[selectedResource.value] || [];
   const config = resourceConfig[selectedResource.value];
@@ -341,20 +333,17 @@ const getPriceChange = (type) => {
 };
 
 onMounted(async () => {
-  // Initialiser le store marketplace (charge les donnees et s'abonne au broker)
   await marketplaceStore.init();
   initialLoading.value = false;
 });
 
 onUnmounted(() => {
-  // Cleanup des subscriptions
   marketplaceStore.cleanup();
 });
 </script>
 
 <template>
   <div class="marketplace-trading">
-    <!-- Header avec solde -->
     <div class="trading-header">
       <div class="header-left">
         <h2>Marketplace</h2>
@@ -378,7 +367,6 @@ onUnmounted(() => {
     <div v-if="error" class="error">{{ error }}</div>
 
     <div class="trading-layout">
-      <!-- Panneau gauche: Stats marche -->
       <div class="market-overview">
         <h3>Apercu du Marche</h3>
 
@@ -417,7 +405,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Mes offres -->
         <div class="my-offers-section">
           <div class="section-header">
             <h4>Mes Offres ({{ myOffers.length }})</h4>
@@ -426,7 +413,6 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <!-- Formulaire creation -->
           <div v-if="showCreateForm" class="create-form-compact">
             <select v-model="newOffer.resourceType">
               <option value="BOISIUM">🪵 Boisium</option>
@@ -455,9 +441,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Panneau central: Order Book + Chart -->
       <div class="center-panel">
-        <!-- Graphique -->
         <div class="chart-section">
           <div class="chart-header">
             <h3>
@@ -489,7 +473,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Order Book -->
         <div class="order-book">
           <div class="order-book-header">
             <h3>Carnet d'Ordres</h3>
@@ -558,7 +541,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Panneau droit: Achat Rapide -->
       <div class="trading-panel">
         <h3>Achat Rapide</h3>
 
@@ -603,7 +585,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Conseils trading -->
         <div class="trading-tips">
           <h4>Conseils</h4>
           <ul>
@@ -627,7 +608,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Modal Edition -->
     <div v-if="editingOffer" class="edit-modal-overlay" @click="cancelEdit">
       <div class="edit-modal" @click.stop>
         <h3>Modifier l'offre</h3>
@@ -790,7 +770,6 @@ onUnmounted(() => {
   height: calc(100% - 80px);
 }
 
-/* Market Overview Panel */
 .market-overview {
   background: #161b22;
   border-radius: 10px;
@@ -884,7 +863,6 @@ onUnmounted(() => {
   margin-top: 5px;
 }
 
-/* My Offers Section */
 .my-offers-section {
   border-top: 1px solid #30363d;
   padding-top: 15px;
@@ -1005,14 +983,12 @@ onUnmounted(() => {
   padding: 15px;
 }
 
-/* Center Panel */
 .center-panel {
   display: flex;
   flex-direction: column;
   gap: 15px;
 }
 
-/* Chart Section */
 .chart-section {
   background: #161b22;
   border-radius: 10px;
@@ -1090,7 +1066,6 @@ onUnmounted(() => {
   opacity: 0.7;
 }
 
-/* Order Book */
 .order-book {
   background: #161b22;
   border-radius: 10px;
@@ -1253,7 +1228,6 @@ onUnmounted(() => {
   padding: 30px;
 }
 
-/* Trading Panel */
 .trading-panel {
   background: #161b22;
   border-radius: 10px;
@@ -1399,7 +1373,6 @@ onUnmounted(() => {
   margin-bottom: 5px;
 }
 
-/* Edit Modal */
 .edit-modal-overlay {
   position: fixed;
   top: 0;

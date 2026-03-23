@@ -3,8 +3,6 @@ from config import GAME_API, CODINGGAME_ID, BACKEND_API, GAME_ID
 
 
 class GameAPIClient:
-    """Client pour l'API du jeu"""
-
     def __init__(self):
         self.base_url = GAME_API
         self.headers = {
@@ -13,7 +11,6 @@ class GameAPIClient:
         }
 
     def _request(self, method: str, path: str, body: dict = None) -> dict:
-        """Effectue une requête HTTP vers l'API"""
         url = f"{self.base_url}{path}"
 
         try:
@@ -42,49 +39,30 @@ class GameAPIClient:
             raise Exception(f"Erreur réseau: {str(e)}") from e
 
     def get_player_details(self) -> dict:
-        """Récupère les détails du joueur (bateau, énergie, îles connues)"""
         return self._request("GET", "/players/details")
 
     def move_ship(self, direction: str) -> dict:
-        """
-        Déplace le bateau dans une direction.
-
-        Directions valides: N, S, E, W, NE, NW, SE, SW
-
-        Retourne:
-        {
-            "position": {"x": int, "y": int, "type": str, "zone": str},
-            "energy": int,
-            "discoveredCells": [{"x": int, "y": int, "type": str, "zone": str, "island": {...}?}]
-        }
-        """
         return self._request("POST", "/ship/move", {"direction": direction})
 
     def get_ship_position(self) -> dict:
-        """Récupère la position actuelle du bateau (si disponible)"""
         try:
             return self._request("GET", "/ship/position")
         except:
             return None
 
     def get_taxes(self) -> list:
-        """Récupère la liste des taxes (RESCUE, etc.)"""
         return self._request("GET", "/taxes")
 
     def pay_tax(self, tax_id: str) -> dict:
-        """Paie une taxe par son ID"""
         return self._request("PUT", f"/taxes/{tax_id}", {})
 
 
 class BackendAPIClient:
-    """Client pour l'API backend (déclenche les broadcasts WebSocket)"""
-
     def __init__(self):
         self.base_url = BACKEND_API
         self.game_id = GAME_ID
 
     def notify_ship_position(self, position: dict):
-        """Notifie le backend de la nouvelle position (broadcast WebSocket)"""
         try:
             requests.put(
                 f"{self.base_url}/api/ship-position/{self.game_id}",
@@ -97,10 +75,9 @@ class BackendAPIClient:
                 timeout=3
             )
         except Exception:
-            pass  # Ne pas bloquer le bot si le backend est indisponible
+            pass
 
     def notify_cells(self, cells: list):
-        """Notifie le backend des nouvelles cellules (broadcast WebSocket)"""
         if not cells:
             return
         try:

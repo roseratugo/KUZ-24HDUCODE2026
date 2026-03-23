@@ -24,7 +24,6 @@ const cooldownPercent = computed(() => {
 
 const lastKeyDirection = ref(null);
 
-// Keyboard mapping (ZQSD + arrows + numpad)
 const KEY_MAP = {
   'ArrowUp': 'N', 'ArrowDown': 'S', 'ArrowLeft': 'W', 'ArrowRight': 'E',
   'z': 'N', 's': 'S', 'q': 'W', 'd': 'E',
