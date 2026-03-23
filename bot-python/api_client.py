@@ -1,9 +1,27 @@
+"""
+Clients HTTP du bot — API du jeu + notre backend.
+
+Deux classes distinctes pour deux APIs differentes :
+
+1. GameAPIClient : appelle l'API EXTERNE du jeu 3026 (deplacer le bateau, infos joueur, taxes)
+   → Source de verite pour l'etat du jeu
+   → Authentification par token JWT dans le header "codinggame-id"
+
+2. BackendAPIClient : notifie NOTRE backend Node.js (positions, cellules)
+   → Permet aux frontends de recevoir les mises a jour en temps reel via WebSocket
+   → Fire-and-forget : les erreurs sont ignorees (le bot ne doit pas crasher
+     si le backend est down)
+"""
+
 import requests
 from config import GAME_API, CODINGGAME_ID, BACKEND_API, GAME_ID
 
 
 class GameAPIClient:
-    """Client pour l'API du jeu"""
+    """
+    Client pour l'API du jeu 3026 (serveur de l'organisateur sur AWS).
+    Toutes les actions du jeu passent par cette API : deplacements, infos joueur, taxes.
+    """
 
     def __init__(self):
         self.base_url = GAME_API
@@ -13,7 +31,11 @@ class GameAPIClient:
         }
 
     def _request(self, method: str, path: str, body: dict = None) -> dict:
-        """Effectue une requête HTTP vers l'API"""
+        """
+        Methode generique pour les appels HTTP.
+        Gere les erreurs HTTP en extrayant le message d'erreur du JSON de reponse
+        (l'API du jeu renvoie des messages comme "SHIP_IN_DISTRESS" ou "TOO_FAST_TOO_FURIOUS").
+        """
         url = f"{self.base_url}{path}"
 
         try:
@@ -26,10 +48,12 @@ class GameAPIClient:
             else:
                 raise ValueError(f"Méthode non supportée: {method}")
 
+            # raise_for_status() leve une HTTPError si le status code est >= 400
             response.raise_for_status()
             return response.json()
 
         except requests.exceptions.HTTPError as e:
+            # Extrait le message d'erreur du JSON de reponse pour un meilleur diagnostic
             error_msg = f"API {response.status_code}"
             try:
                 err_data = response.json()
@@ -42,49 +66,54 @@ class GameAPIClient:
             raise Exception(f"Erreur réseau: {str(e)}") from e
 
     def get_player_details(self) -> dict:
-        """Récupère les détails du joueur (bateau, énergie, îles connues)"""
+        """Infos du joueur : nom, or, bateau (energie, niveau), iles decouvertes"""
         return self._request("GET", "/players/details")
 
     def move_ship(self, direction: str) -> dict:
         """
-        Déplace le bateau dans une direction.
-
-        Directions valides: N, S, E, W, NE, NW, SE, SW
-
-        Retourne:
-        {
-            "position": {"x": int, "y": int, "type": str, "zone": str},
-            "energy": int,
-            "discoveredCells": [{"x": int, "y": int, "type": str, "zone": str, "island": {...}?}]
-        }
+        Deplace le bateau dans une direction (N, NE, E, SE, S, SW, W, NW).
+        Retourne : position, energy, discoveredCells[]
         """
         return self._request("POST", "/ship/move", {"direction": direction})
 
     def get_ship_position(self) -> dict:
-        """Récupère la position actuelle du bateau (si disponible)"""
+        """Position actuelle du bateau (peut echouer si le bateau n'est pas construit)"""
         try:
             return self._request("GET", "/ship/position")
         except:
             return None
 
     def get_taxes(self) -> list:
-        """Récupère la liste des taxes (RESCUE, etc.)"""
+        """Liste des taxes (amendes) en attente — a payer pour debloquer le bateau"""
         return self._request("GET", "/taxes")
 
     def pay_tax(self, tax_id: str) -> dict:
-        """Paie une taxe par son ID"""
+        """Paie une taxe par son ID — necessaire quand le bateau est en detresse"""
         return self._request("PUT", f"/taxes/{tax_id}", {})
 
 
 class BackendAPIClient:
-    """Client pour l'API backend (déclenche les broadcasts WebSocket)"""
+    """
+    Client pour notre backend Node.js (port 3001).
+
+    Envoie des notifications "fire-and-forget" pour que les frontends
+    recoivent les mises a jour en temps reel via WebSocket.
+
+    Les erreurs sont silencieusement ignorees (except: pass) car :
+    - Le bot doit continuer a explorer meme si le backend est down
+    - Les donnees sont aussi persistees directement en MongoDB
+    - Le timeout court (3s) evite de bloquer le bot
+    """
 
     def __init__(self):
         self.base_url = BACKEND_API
         self.game_id = GAME_ID
 
     def notify_ship_position(self, position: dict):
-        """Notifie le backend de la nouvelle position (broadcast WebSocket)"""
+        """
+        Notifie le backend de la nouvelle position du bateau.
+        Le backend fera un broadcast WebSocket "ship:position" aux frontends.
+        """
         try:
             requests.put(
                 f"{self.base_url}/api/ship-position/{self.game_id}",
@@ -97,10 +126,13 @@ class BackendAPIClient:
                 timeout=3
             )
         except Exception:
-            pass  # Ne pas bloquer le bot si le backend est indisponible
+            pass
 
     def notify_cells(self, cells: list):
-        """Notifie le backend des nouvelles cellules (broadcast WebSocket)"""
+        """
+        Envoie les cellules decouvertes au backend (bulk upsert).
+        Le backend fera un broadcast WebSocket "cells:update" aux frontends.
+        """
         if not cells:
             return
         try:

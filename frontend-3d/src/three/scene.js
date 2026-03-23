@@ -1,3 +1,20 @@
+/**
+ * GameScene — Moteur de rendu 3D principal
+ *
+ * Cette classe gere toute la scene Three.js :
+ * - Renderer WebGL avec antialiasing et tone mapping cinema (ACES Filmic)
+ * - Ocean anime (shader Water de Three.js avec vagues et reflets)
+ * - Ciel procedural (shader Sky avec soleil configurable)
+ * - Bateau 3D avec interpolation fluide entre les positions
+ * - Iles procedurales generees a partir des cellules SAND de la carte
+ * - Faune : oiseaux en orbite autour des iles + dauphins autour du bateau
+ * - Systeme de saut/salto du bateau (touche Y)
+ *
+ * Systeme de coordonnees :
+ *   Grille du jeu (x, y) → Three.js (x * CELL_SIZE, hauteur, -y * CELL_SIZE)
+ *   L'axe Y du jeu est inverse en Z dans Three.js
+ */
+
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Water } from 'three/addons/objects/Water.js';
@@ -10,47 +27,58 @@ import { DolphinManager } from './dolphins.js';
 export class GameScene {
   constructor(container) {
     this.container = container;
-    this.cells = new Map();
-    this.shipPosition = { x: 0, y: 0 };
+    this.cells = new Map();                 // Toutes les cellules connues, cle "x,y"
+    this.shipPosition = { x: 0, y: 0 };    // Position actuelle sur la grille du jeu
     this.clock = new THREE.Clock();
-    this.boat = null;
+    this.boat = null;                        // Modele 3D du bateau
 
-    this.CELL_SIZE = 10;
+    this.CELL_SIZE = 10;                     // 1 cellule de jeu = 10 unites Three.js
 
     this.init();
     this.loadShipModel();
     this.animate();
   }
 
+  /**
+   * Initialisation de la scene Three.js
+   * Cree le renderer, la camera, l'eau, le ciel, les lumieres,
+   * et les managers pour les iles, oiseaux et dauphins
+   */
   init() {
-    // Renderer
+    // --- Renderer ---
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // Limite le pixel ratio a 2 pour eviter de tuer les GPU sur les ecrans Retina
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Tone mapping ACES Filmic = rendu cinematographique (meilleurs contrastes/couleurs)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.8;
     this.container.appendChild(this.renderer.domElement);
 
-    // Scene
+    // --- Scene + brouillard ---
     this.scene = new THREE.Scene();
+    // Le brouillard masque les iles lointaines et cree une impression de profondeur
+    // start=200 : le brouillard commence a 200 unites, end=800 : opaque a 800
     this.scene.fog = new THREE.Fog(0x8eafc1, 200, 800);
 
-    // Camera
+    // --- Camera ---
+    // Perspective 55° de FOV, vue de 1 a 1500 unites
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 1500);
-    this.camera.position.set(30, 40, 100);
+    this.camera.position.set(30, 40, 100); // Position initiale : legrement au-dessus et derriere
 
-    // Controls
+    // --- OrbitControls : drag + zoom autour du bateau ---
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.maxPolarAngle = Math.PI * 0.45;
-    this.controls.minDistance = 10;
-    this.controls.maxDistance = 300;
-    this.controls.enableDamping = true;
+    this.controls.maxPolarAngle = Math.PI * 0.45;  // Empeche la camera de passer sous l'eau
+    this.controls.minDistance = 10;                   // Zoom min
+    this.controls.maxDistance = 300;                  // Zoom max
+    this.controls.enableDamping = true;              // Inertie douce sur le drag
     this.controls.dampingFactor = 0.05;
 
-    // Sun
     this.sun = new THREE.Vector3();
 
-    // Water (sized to fog far distance, not overkill)
+    // --- Ocean anime ---
+    // Plan de 2000x2000 unites avec le shader Water de Three.js
+    // Les normales (waternormals.jpg) creent l'illusion de vagues
     const waterGeometry = new THREE.PlaneGeometry(2000, 2000);
     this.water = new Water(waterGeometry, {
       textureWidth: 512,
@@ -63,77 +91,76 @@ export class GameScene {
       ),
       sunDirection: new THREE.Vector3(),
       sunColor: 0xffffff,
-      waterColor: 0x001e0f,
-      distortionScale: 3.7,
+      waterColor: 0x001e0f,      // Vert fonce profond
+      distortionScale: 3.7,       // Intensite de la deformation des vagues
       fog: true
     });
-    this.water.rotation.x = -Math.PI / 2;
+    this.water.rotation.x = -Math.PI / 2; // Horizontal (le plan est vertical par defaut)
     this.water.position.y = 0;
     this.scene.add(this.water);
 
-    // Sky
+    // --- Ciel procedural ---
     this.sky = new Sky();
-    this.sky.scale.setScalar(10000);
+    this.sky.scale.setScalar(10000); // Enorme sphere pour couvrir tout le fond
     this.scene.add(this.sky);
 
+    // Parametres atmospheriques du ciel
     const skyUniforms = this.sky.material.uniforms;
-    skyUniforms['turbidity'].value = 10;
-    skyUniforms['rayleigh'].value = 2;
-    skyUniforms['mieCoefficient'].value = 0.005;
+    skyUniforms['turbidity'].value = 10;         // Brume atmospherique
+    skyUniforms['rayleigh'].value = 2;            // Diffusion (bleu du ciel)
+    skyUniforms['mieCoefficient'].value = 0.005;  // Diffusion Mie (halo solaire)
     skyUniforms['mieDirectionalG'].value = 0.8;
 
     this.updateSun();
 
-    // Lights
+    // --- Lumieres ---
+    // Ambiante bleutee (simule la lumiere reflechie par le ciel/ocean)
     const ambientLight = new THREE.AmbientLight(0x6688aa, 1.5);
     this.scene.add(ambientLight);
-
+    // Directionnelle blanc chaud (simule le soleil)
     const directionalLight = new THREE.DirectionalLight(0xfff4e0, 2.5);
     directionalLight.position.set(50, 100, 50);
     this.scene.add(directionalLight);
 
-    // Ship physics — smooth interpolation between server updates
-    this.targetBoatPos = new THREE.Vector3(0, 11, 0);   // current server target
-    this.prevTargetPos = new THREE.Vector3(0, 11, 0);    // previous server target
-    this.smoothedTarget = new THREE.Vector3(0, 11, 0);   // interpolated target (what we actually chase)
-    this.boatVelocity = new THREE.Vector3(0, 0, 0);     // estimated velocity from server updates
-    this.boatHeading = 0;
-    this.targetHeading = 0;
-    this.lastUpdateTime = 0;       // timestamp of last server update
-    this.updateInterval = 0.2;     // estimated interval between server updates (seconds)
-    this.interpProgress = 1;       // 0..1 progress between prev and current target
+    // --- Etat d'interpolation du bateau ---
+    // Le bateau ne se teleporte pas : il glisse en douceur entre les positions
+    this.targetBoatPos = new THREE.Vector3(0, 11, 0);   // Position cible
+    this.prevTargetPos = new THREE.Vector3(0, 11, 0);    // Position precedente
+    this.smoothedTarget = new THREE.Vector3(0, 11, 0);   // Position interpolee courante
+    this.boatVelocity = new THREE.Vector3(0, 0, 0);      // Vitesse estimee (pour prediction)
+    this.boatHeading = 0;         // Direction actuelle du bateau (radians)
+    this.targetHeading = 0;       // Direction cible
+    this.lastUpdateTime = 0;      // Timestamp du dernier updateShipPosition
+    this.updateInterval = 0.2;    // Duree estimee entre updates (EMA, moyenne mobile)
+    this.interpProgress = 1;      // 0→1 : progression de l'interpolation courante
 
-    // Pre-allocated vectors for animate() to avoid per-frame GC
+    // Vecteurs temporaires reutilises chaque frame (evite les allocations dans animate())
     this._toTarget = new THREE.Vector3();
     this._scenePos = new THREE.Vector3();
     this._predicted = new THREE.Vector3();
 
-    // Islands
+    // --- Managers de la faune et des iles ---
     this.islandManager = new IslandManager(this.scene, this.CELL_SIZE);
-
-    // Birds
     this.birdManager = new BirdManager(this.scene);
     this._birdsSpawned = false;
-
-    // Dolphins
     this.dolphinManager = new DolphinManager(this.scene);
     this._dolphinsSpawned = false;
 
-    // Boat backflip (Y key)
-    this._jumpTimer = -1;       // -1 = not jumping
-    this._jumpTotalDuration = 3.0; // total animation time
-    this._jumpHeight = 18;
-    this._diveDepth = 5;
+    // --- Systeme de saut (touche Y) ---
+    this._jumpTimer = -1;           // -1 = pas en cours, >=0 = temps ecoule du saut
+    this._jumpTotalDuration = 3.0;  // Duree totale du saut+plongee en secondes
+    this._jumpHeight = 18;          // Hauteur max du saut
+    this._diveDepth = 5;            // Profondeur de la plongee apres le saut
     this._onKeyDown = (e) => {
       if (e.key === 'y' || e.key === 'Y') this.triggerJump();
     };
     window.addEventListener('keydown', this._onKeyDown);
 
-    // Resize
     this._onResize = () => this.onResize();
     window.addEventListener('resize', this._onResize);
   }
 
+  /** Charge le modele GLTF du bateau, avec fallback sur un cube brun */
   async loadShipModel() {
     try {
       this.boat = await loadBoat();
@@ -142,7 +169,6 @@ export class GameScene {
 
     } catch (err) {
       console.error('Ship model load failed, using fallback');
-      // Fallback: simple box
       const geo = new THREE.BoxGeometry(4, 2, 8);
       const mat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
       this.boat = new THREE.Mesh(geo, mat);
@@ -151,21 +177,34 @@ export class GameScene {
     }
   }
 
+  /** Configure la position du soleil (affecte le ciel et les reflets sur l'eau) */
   updateSun() {
-    const phi = THREE.MathUtils.degToRad(60);
-    const theta = THREE.MathUtils.degToRad(180);
-
+    const phi = THREE.MathUtils.degToRad(60);    // Elevation : 60° au-dessus de l'horizon
+    const theta = THREE.MathUtils.degToRad(180); // Azimut : plein sud
     this.sun.setFromSphericalCoords(1, phi, theta);
-
     this.sky.material.uniforms['sunPosition'].value.copy(this.sun);
     this.water.material.uniforms['sunDirection'].value.copy(this.sun).normalize();
   }
 
+  /**
+   * Convertit des coordonnees de la grille du jeu en position Three.js
+   * L'axe Y du jeu est inverse en Z (convention Three.js : Z pointe vers l'ecran)
+   */
   worldToScene(x, y, target) {
     const out = target || this._scenePos;
     return out.set(x * this.CELL_SIZE, 0, -y * this.CELL_SIZE);
   }
 
+  /**
+   * Met a jour la position cible du bateau
+   *
+   * Ne deplace pas le bateau instantanement — met a jour les variables d'interpolation
+   * que la boucle animate() utilisera pour un mouvement fluide.
+   *
+   * Calcule aussi la velocite et la direction pour la prediction de mouvement.
+   * L'updateInterval est calcule avec une moyenne mobile exponentielle (EMA)
+   * pour s'adapter aux variations de frequence des mises a jour.
+   */
   updateShipPosition(pos) {
     if (!pos) return;
     const moved = pos.x !== this.shipPosition.x || pos.y !== this.shipPosition.y;
@@ -174,20 +213,20 @@ export class GameScene {
 
     const now = performance.now() / 1000;
 
-    // Save previous target before overwriting
+    // Sauvegarde la position precedente pour l'interpolation
     this.prevTargetPos.copy(this.targetBoatPos);
 
-    // Estimate update interval from actual timing
+    // Moyenne mobile exponentielle de l'intervalle entre updates
+    // Poids 0.3 : 30% nouvelle mesure, 70% ancienne → lissage
     if (this.lastUpdateTime > 0) {
       const dt = now - this.lastUpdateTime;
       if (dt > 0.01 && dt < 2) {
-        // Smooth the interval estimate
         this.updateInterval = this.updateInterval * 0.7 + dt * 0.3;
       }
     }
     this.lastUpdateTime = now;
 
-    // Compute velocity and heading from position delta
+    // Calcule la vitesse et la direction si le bateau a bouge
     if (moved) {
       const dx = scenePos.x - this.prevTargetPos.x;
       const dz = scenePos.z - this.prevTargetPos.z;
@@ -197,18 +236,17 @@ export class GameScene {
       this.boatVelocity.set(0, 0, 0);
     }
 
-    // Set the new target and reset interpolation progress
     this.targetBoatPos.set(scenePos.x, 11, scenePos.z);
-    this.interpProgress = 0;
+    this.interpProgress = 0; // Reset l'interpolation → le bateau va glisser vers la cible
 
     if (moved) {
-      this.refreshNearbyIslands();
+      this.refreshNearbyIslands(); // Regenere les iles proches si on a bouge
     }
 
-    // Spawn dolphins around the boat
     this._trySpawnDolphins(scenePos.x, scenePos.z);
   }
 
+  /** Tente de spawner les dauphins (attend que le modele GLTF soit charge) */
   _trySpawnDolphins(sx, sz) {
     if (!this.dolphinManager.ready) {
       if (!this._dolphinRetry) {
@@ -229,6 +267,11 @@ export class GameScene {
     }
   }
 
+  /**
+   * Regenere les iles dans un rayon de 100 cellules autour du bateau
+   * Seules les cellules SAND dans ce rayon sont envoyees a l'IslandManager
+   * Les iles plus lointaines sont cachees (optimisation)
+   */
   refreshNearbyIslands() {
     const RENDER_RADIUS = 100;
     const sx = this.shipPosition.x;
@@ -240,18 +283,18 @@ export class GameScene {
       if (cell.type !== 'SAND') continue;
       const dx = cell.x - sx;
       const dy = cell.y - sy;
+      // Distance au carre pour eviter le sqrt (optimisation classique)
       if (dx * dx + dy * dy <= RENDER_RADIUS * RENDER_RADIUS) {
         this.islandManager.addCell(cell);
       }
     }
 
-    // Spawn birds above islands when layout changes
     this._trySpawnBirds(prevHash);
   }
 
+  /** Spawne les oiseaux si les iles ont change (hash different) */
   _trySpawnBirds(prevHash) {
     if (!this.birdManager.ready) {
-      // Retry once the model is loaded
       if (!this._birdRetry) {
         this._birdRetry = setInterval(() => {
           if (this.birdManager.ready) {
@@ -263,12 +306,16 @@ export class GameScene {
       }
       return;
     }
-    // Only respawn if island layout actually changed
     if (this.islandManager.lastHash !== prevHash) {
       this._spawnBirdsForIslands();
     }
   }
 
+  /**
+   * Cree des vols d'oiseaux pour chaque cluster d'ile assez grand
+   * Seules les "vraies" iles (avec une reference island dans les cellules) ont des oiseaux
+   * Les iles du mode dev (sans reference) n'en ont pas
+   */
   _spawnBirdsForIslands() {
     this.birdManager.clear();
     const clusters = this.islandManager.findClusters();
@@ -276,8 +323,7 @@ export class GameScene {
       const cells = clusters[i];
       if (cells.length < 3) continue;
 
-      // Only spawn birds on real islands (cells with island data)
-      // Check if any cell in the cluster belongs to a known island
+      // Verifie qu'au moins une cellule a une reference "island" du backend
       let isRealIsland = false;
       for (const c of cells) {
         const stored = this.cells.get(`${c.x},${c.y}`);
@@ -288,13 +334,14 @@ export class GameScene {
       }
       if (!isRealIsland) continue;
 
-      // Compute island center in scene coords
+      // Calcule le centre du cluster (centroide)
       let sumX = 0, sumY = 0;
       for (const c of cells) { sumX += c.x; sumY += c.y; }
       const cx = (sumX / cells.length) * this.CELL_SIZE;
       const cz = -(sumY / cells.length) * this.CELL_SIZE;
       const radius = Math.sqrt(cells.length) * this.CELL_SIZE * 0.5;
 
+      // Seed deterministe basee sur l'index + taille → meme ile = memes oiseaux
       this.birdManager.spawnFlock(
         new THREE.Vector3(cx, 0, cz),
         Math.max(radius, 15),
@@ -303,6 +350,7 @@ export class GameScene {
     }
   }
 
+  /** Ajoute des cellules a la carte et met a jour les iles proches */
   updateCells(cells) {
     const RENDER_RADIUS = 100;
     const sx = this.shipPosition.x;
@@ -315,7 +363,6 @@ export class GameScene {
       }
     });
 
-    // Only send nearby SAND cells to island manager
     this.islandManager.setShipPosition(sx, sy, RENDER_RADIUS);
     for (const [, cell] of this.cells) {
       if (cell.type !== 'SAND') continue;
@@ -328,7 +375,7 @@ export class GameScene {
   }
 
   triggerJump() {
-    if (this._jumpTimer >= 0) return; // already jumping
+    if (this._jumpTimer >= 0) return; // Un saut est deja en cours
     this._jumpTimer = 0;
   }
 
@@ -336,6 +383,19 @@ export class GameScene {
     this.islandManager.updateIsland(island);
   }
 
+  /**
+   * Boucle d'animation principale — appelee a chaque frame (~60fps)
+   *
+   * Gere dans l'ordre :
+   * 1. Animation de l'eau (avance le temps du shader)
+   * 2. Interpolation de la position du bateau (smoothstep + prediction)
+   * 3. Rotation du bateau vers sa direction de deplacement
+   * 4. Animation de saut/salto si actif (touche Y)
+   * 5. Oscillation verticale (bob) simulant les vagues
+   * 6. L'eau suit le bateau (le plan d'eau se deplace avec lui pour l'infini)
+   * 7. La camera suit le bateau en douceur
+   * 8. Mise a jour des oiseaux et dauphins
+   */
   animate() {
     requestAnimationFrame(() => this.animate());
 
@@ -343,28 +403,30 @@ export class GameScene {
     this.elapsedTime = (this.elapsedTime || 0) + delta;
     const time = this.elapsedTime;
 
-    // Water animation
+    // 1. Anime les vagues de l'ocean
     this.water.material.uniforms['time'].value = time;
 
     if (this.boat) {
-      // --- Smooth target interpolation between server updates ---
-      // Advance interpolation progress based on expected update interval
+      // 2. Interpolation de position avec smoothstep
+      // interpProgress va de 0 a 1 sur la duree estimee entre deux mises a jour
       this.interpProgress = Math.min(1, this.interpProgress + delta / this.updateInterval);
 
-      // Smoothstep easing for natural acceleration/deceleration
       const t = this.interpProgress;
+      // Smoothstep : acceleration douce puis deceleration douce (pas de mouvement brusque)
       const ease = t * t * (3 - 2 * t);
 
-      // Interpolate between previous and current target
+      // Interpolation lineaire entre position precedente et cible, modulee par ease
       this.smoothedTarget.lerpVectors(this.prevTargetPos, this.targetBoatPos, ease);
 
-      // Add velocity-based prediction to overshoot slightly for fluid motion
-      const prediction = Math.max(0, (t - 0.5) * 0.3); // gentle extrapolation in 2nd half
+      // Prediction de velocite : au-dela de 50% du trajet, on anticipe la prochaine position
+      // Ca evite que le bateau "freine" quand on recoit une nouvelle position
+      const prediction = Math.max(0, (t - 0.5) * 0.3);
       this._predicted.copy(this.boatVelocity).multiplyScalar(prediction * this.updateInterval);
       this.smoothedTarget.add(this._predicted);
-      this.smoothedTarget.y = 11; // keep Y locked
+      this.smoothedTarget.y = 11; // Hauteur fixe (au-dessus de l'eau)
 
-      // --- Position: smooth chase toward the interpolated target ---
+      // Lerp final : le bateau s'approche exponentiellement de la cible
+      // pow(0.005, delta) ≈ 0 quand delta est grand → lerp rapide
       const toTarget = this._toTarget.set(
         this.smoothedTarget.x - this.boat.position.x,
         0,
@@ -372,22 +434,21 @@ export class GameScene {
       );
       const distToTarget = toTarget.length();
 
-      // Smooth movement toward target
       const lerpSpeed = 1 - Math.pow(0.005, delta);
       this.boat.position.x += (this.smoothedTarget.x - this.boat.position.x) * lerpSpeed;
       this.boat.position.z += (this.smoothedTarget.z - this.boat.position.z) * lerpSpeed;
 
-      // Smooth turn (targetHeading updated only on server position change)
+      // 3. Rotation douce vers la direction de deplacement
+      // Gere le wrap-around des angles (ex: de 350° a 10° = +20°, pas -340°)
       let headingDiff = this.targetHeading - this.boatHeading;
       while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
       while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
       this.boatHeading += headingDiff * Math.min(1, 3.0 * delta);
 
-      // Use YXZ Euler order: heading (Y) first, then pitch/backflip (X), then roll (Z)
-      this.boat.rotation.order = 'YXZ';
+      this.boat.rotation.order = 'YXZ'; // Applique Y (heading) puis X (pitch) puis Z (roll)
       this.boat.rotation.y = this.boatHeading;
 
-      // Backflip animation (Y key)
+      // 4. Saut/salto (touche Y)
       let jumpY = 0;
       let flipAngle = 0;
       let isFlipping = false;
@@ -395,60 +456,63 @@ export class GameScene {
         this._jumpTimer += delta;
         const totalT = this._jumpTimer / this._jumpTotalDuration;
         if (totalT >= 1) {
-          this._jumpTimer = -1;
+          this._jumpTimer = -1; // Saut termine
         } else {
           isFlipping = true;
           const t = totalT;
+          // Phase 1 (0–75%) : arc parabolique vers le haut
           if (t < 0.75) {
             const p = t / 0.75;
-            jumpY = this._jumpHeight * 4 * p * (1 - p);
+            jumpY = this._jumpHeight * 4 * p * (1 - p); // Parabole : max au milieu
           } else {
+            // Phase 2 (75–100%) : plongee sous l'eau
             const p = (t - 0.75) / 0.25;
             jumpY = -this._diveDepth * Math.sin(p * Math.PI);
           }
 
-          // Backflip on X axis (pitch axis in YXZ order = lateral axis)
+          // Animation de rotation (salto avant complet = 360°)
           if (t < 0.1) {
             const p = t / 0.1;
-            flipAngle = p * p * 0.2;
+            flipAngle = p * p * 0.2; // Debut lent
           } else if (t < 0.7) {
             const p = (t - 0.1) / 0.6;
             const ease = p * p * (3 - 2 * p);
-            flipAngle = 0.2 + ease * (Math.PI * 2 - 0.2);
+            flipAngle = 0.2 + ease * (Math.PI * 2 - 0.2); // Rotation principale
           } else if (t < 0.85) {
             const p = (t - 0.7) / 0.15;
-            flipAngle = Math.PI * 2 * (1 + 0.03 * (1 - p));
+            flipAngle = Math.PI * 2 * (1 + 0.03 * (1 - p)); // Legere surrotation
           } else {
             const p = (t - 0.85) / 0.15;
-            flipAngle = Math.PI * 2 * (1 - p * p * (3 - 2 * p)) * 0.03;
+            flipAngle = Math.PI * 2 * (1 - p * p * (3 - 2 * p)) * 0.03; // Retour au repos
           }
         }
       }
 
-      // Apply: X = pitch/backflip (lateral axis), Z = roll (forward axis)
+      // 5. Pitch (inclinaison avant/arriere) + bob (oscillation verticale)
       const speed = Math.min(1, distToTarget);
       if (isFlipping) {
         this.boat.rotation.x = flipAngle;
         this.boat.rotation.z = 0;
       } else {
+        // Le bateau s'incline legerement vers l'avant quand il avance
         const targetPitch = -speed * 0.03 + Math.sin(time * 1.2) * 0.015;
         this.boat.rotation.x = THREE.MathUtils.lerp(this.boat.rotation.x, targetPitch, 1 - Math.pow(0.05, delta));
         this.boat.rotation.z = THREE.MathUtils.lerp(this.boat.rotation.z, 0, 1 - Math.pow(0.005, delta));
       }
 
-      // Bobbing + jump
+      // Oscillation verticale : 2 sinus superposes pour un mouvement naturel
       this.boat.position.y = 11 + Math.sin(time * 1.5) * 0.3 + Math.sin(time * 2.3) * 0.1 + jumpY;
 
-      // Water follows the boat so it's always visible
+      // 6. L'eau "suit" le bateau → illusion d'un ocean infini
       this.water.position.x = this.boat.position.x;
       this.water.position.z = this.boat.position.z;
 
-      // Camera follow — smoother
+      // 7. La camera suit le bateau en douceur
       const camSpeed = 1 - Math.pow(0.05, delta);
       this.controls.target.lerp(this.boat.position, camSpeed);
     }
 
-    // Birds & Dolphins
+    // 8. Anime les oiseaux (orbite) et les dauphins (sauts)
     this.birdManager.update(delta, time);
     this.dolphinManager.update(delta, time);
 
@@ -462,6 +526,7 @@ export class GameScene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
+  /** Nettoie toutes les ressources Three.js et les event listeners */
   dispose() {
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('keydown', this._onKeyDown);

@@ -29,13 +29,11 @@ const getTarget = () => gameScene?.controls?.target;
 let disconnectWs = null;
 let positionPollTimer = null;
 
-// Demo data for dev mode (no backend)
 function loadDevFallback() {
   devMode.value = true;
   console.log('[3D] Dev mode: using fallback data');
 
   const demoCells = [];
-  // Create a few islands
   const islands = [
     { id: 'island-1', name: 'Ile du Soleil', x: 0, y: 0, radius: 2 },
     { id: 'island-2', name: 'Ile des Palmiers', x: 15, y: -12, radius: 1 },
@@ -58,7 +56,6 @@ function loadDevFallback() {
     }
   });
 
-  // Sea around
   for (let x = -15; x <= 15; x++) {
     for (let y = -15; y <= 15; y++) {
       const key = `${x},${y}`;
@@ -73,7 +70,6 @@ function loadDevFallback() {
   islandCount.value = islands.length;
   allCells.value = gameScene.cells;
 
-  // Place ship
   shipPos.value = { x: 5, y: 0 };
   gameScene.updateShipPosition({ x: 5, y: 0 });
 }
@@ -82,7 +78,6 @@ onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown);
   gameScene = new GameScene(canvasContainer.value);
 
-  // Try loading from backend
   try {
     const [cells, islands, shipPosition] = await Promise.all([
       fetchCells(),
@@ -94,19 +89,16 @@ onMounted(async () => {
       throw new Error('No data from backend');
     }
 
-    // Set ship position FIRST so islands are generated around the boat
     if (shipPosition) {
       shipPos.value = { x: shipPosition.x, y: shipPosition.y };
       gameScene.updateShipPosition(shipPosition);
     }
 
-    // Then load cells (filtered by ship position radius)
     cellCount.value = cells.length;
     islandCount.value = islands.length;
     gameScene.updateCells(cells);
     allCells.value = gameScene.cells;
 
-    // Poll ship position every 5s
     positionPollTimer = setInterval(async () => {
       try {
         const pos = await fetchShipPosition();
@@ -114,10 +106,9 @@ onMounted(async () => {
           shipPos.value = { x: pos.x, y: pos.y };
           gameScene.updateShipPosition(pos);
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) { }
     }, 5000);
 
-    // WebSocket for real-time updates
     disconnectWs = connectWebSocket(({ event, data }) => {
       if (event === 'ws:connected') { wsConnected.value = true; return; }
       if (event === 'ws:disconnected') { wsConnected.value = false; return; }

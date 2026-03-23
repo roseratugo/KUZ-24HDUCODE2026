@@ -1,14 +1,42 @@
+/**
+ * IslandManager — Generation procedurale des iles en 3D
+ *
+ * Les iles ne sont pas des modeles 3D statiques — elles sont generees
+ * dynamiquement a partir des cellules SAND de la carte du jeu.
+ *
+ * Pipeline de rendu :
+ * 1. Le backend envoie les cellules SAND proches du bateau
+ * 2. findClusters() detecte les groupes de cellules adjacentes (BFS 8 directions)
+ * 3. Chaque cluster est classifie par taille : TINY (≤2), SMALL (≤15), MEDIUM (<50), LARGE (≥50)
+ * 4. Un template pre-construit est clone et redimensionne pour chaque cluster
+ *
+ * Templates par taille :
+ * - TINY  : simple dodecaedre aplati (sable)
+ * - SMALL : terrain avec bruit simplex + 2 palmiers
+ * - MEDIUM : terrain + 5 palmiers + 3 buissons + 2 rochers
+ * - LARGE : terrain + anneau d'eau peu profonde + 12 palmiers + 6 buissons + 4 rochers
+ *
+ * Le terrain est un PlaneGeometry deforme par vertex avec :
+ * - Bruit simplex a 2 octaves pour la forme de cote (irreguliere)
+ * - Profil smoothstep pour la forme generale (haut au centre, bas aux bords)
+ * - Vertex colors : brun sous-marin → sable → herbe → vert fonce → gris roche
+ * - Les triangles sous l'eau sont supprimes du buffer d'index (optimisation)
+ *
+ * Les palmiers sont des TubeGeometry (tronc courbe) + ShapeGeometry (6 palmes).
+ * Tous les materiaux sont partages (crees une seule fois) pour economiser la VRAM.
+ */
+
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 
+// Deux generateurs de bruit independants pour les deux octaves du terrain
 const noise2D = createNoise2D();
 const noise2D_2 = createNoise2D();
 
-// Size categories
-const TINY = 'tiny';     // 1-2 cells
-const SMALL = 'small';   // 3-15 cells
-const MEDIUM = 'medium'; // 16-49 cells
-const LARGE = 'large';   // 50+ cells
+const TINY = 'tiny';
+const SMALL = 'small';
+const MEDIUM = 'medium';
+const LARGE = 'large';
 
 function getCategory(cellCount) {
   if (cellCount <= 2) return TINY;
@@ -22,13 +50,12 @@ export class IslandManager {
     this.scene = scene;
     this.cellSize = cellSize;
     this.sandCells = new Map();
-    this.islandMeshes = new Map(); // clusterId -> THREE.Group
-    this.templates = new Map(); // category -> THREE.Group (source template)
+    this.islandMeshes = new Map();
+    this.templates = new Map();
     this.dirty = false;
     this.rebuildTimer = null;
     this.lastHash = '';
 
-    // Shared materials (avoid creating duplicates per mesh)
     this._sharedMaterials = {
       terrain: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.02, side: THREE.DoubleSide }),
       trunk: new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.95 }),
@@ -38,7 +65,6 @@ export class IslandManager {
       shallow: new THREE.MeshStandardMaterial({ color: 0x1a998e, transparent: true, opacity: 0.2, roughness: 0.3, side: THREE.DoubleSide }),
       fronds: [],
     };
-    // Pre-create 3 frond material variants
     for (let i = 0; i < 3; i++) {
       this._sharedMaterials.fronds.push(new THREE.MeshStandardMaterial({
         color: new THREE.Color().setHSL(0.30 + i * 0.015, 0.55, 0.25),
@@ -46,12 +72,10 @@ export class IslandManager {
       }));
     }
 
-    // Reusable Color objects for terrain generation
     this._tmpColor = new THREE.Color();
     this._tmpColorA = new THREE.Color();
     this._tmpColorB = new THREE.Color();
 
-    // Pre-generate templates
     this.generateTemplates();
   }
 
@@ -61,8 +85,6 @@ export class IslandManager {
     this.templates.set(MEDIUM, this.createMediumTemplate());
     this.templates.set(LARGE, this.createLargeTemplate());
   }
-
-  // ===== Templates (generated once) =====
 
   createTinyTemplate() {
     const group = new THREE.Group();
@@ -89,7 +111,6 @@ export class IslandManager {
     const geo = this.createTerrainGeo(worldRadius, 24, seed, 3);
     group.add(new THREE.Mesh(geo, this.createTerrainMaterial()));
 
-    // 2 palm trees
     for (let i = 0; i < 2; i++) {
       const angle = (i / 2) * Math.PI * 2 + 0.5;
       const tree = this.createPalmTree(seed + i);
@@ -109,7 +130,6 @@ export class IslandManager {
     const geo = this.createTerrainGeo(worldRadius, 40, seed, 5);
     group.add(new THREE.Mesh(geo, this.createTerrainMaterial()));
 
-    // 5 trees
     for (let i = 0; i < 5; i++) {
       const angle = ((i * 137.508) % 360) * Math.PI / 180;
       const dist = worldRadius * (0.15 + (i % 3) * 0.12);
@@ -119,7 +139,6 @@ export class IslandManager {
       group.add(tree);
     }
 
-    // Bushes
     for (let i = 0; i < 3; i++) {
       const angle = ((i * 97 + 50) % 360) * Math.PI / 180;
       const dist = worldRadius * 0.3;
@@ -128,7 +147,6 @@ export class IslandManager {
       group.add(bush);
     }
 
-    // Rocks
     for (let i = 0; i < 2; i++) {
       const rock = this.createRock(i);
       rock.position.set((i - 0.5) * worldRadius * 0.6, 0.5, worldRadius * 0.7);
@@ -146,14 +164,12 @@ export class IslandManager {
     const geo = this.createTerrainGeo(worldRadius, 64, seed, 7);
     group.add(new THREE.Mesh(geo, this.createTerrainMaterial()));
 
-    // Shallow water ring
     const shallowGeo = new THREE.RingGeometry(worldRadius * 0.85, worldRadius * 1.1, 32);
     shallowGeo.rotateX(-Math.PI / 2);
     const shallow = new THREE.Mesh(shallowGeo, this._sharedMaterials.shallow);
     shallow.position.y = 0.15;
     group.add(shallow);
 
-    // 12 trees
     for (let i = 0; i < 12; i++) {
       const angle = ((i * 137.508 + seed) % 360) * Math.PI / 180;
       const dist = worldRadius * (0.1 + (i % 4) * 0.12);
@@ -163,7 +179,6 @@ export class IslandManager {
       group.add(tree);
     }
 
-    // Bushes
     for (let i = 0; i < 6; i++) {
       const angle = ((i * 60 + 30) % 360) * Math.PI / 180;
       const dist = worldRadius * (0.2 + (i % 3) * 0.1);
@@ -173,7 +188,6 @@ export class IslandManager {
       group.add(bush);
     }
 
-    // Rocks
     for (let i = 0; i < 4; i++) {
       const angle = ((i * 90 + 45) % 360) * Math.PI / 180;
       const rock = this.createRock(i);
@@ -183,8 +197,6 @@ export class IslandManager {
 
     return group;
   }
-
-  // ===== Terrain generation =====
 
   createTerrainGeo(worldRadius, segments, seed, maxHeight) {
     const size = worldRadius * 2.4;
@@ -225,7 +237,6 @@ export class IslandManager {
 
       positions.setY(i, height);
 
-      // Vertex colors — reuse pre-allocated Color objects
       const color = this._tmpColor;
       const ca = this._tmpColorA;
       const cb = this._tmpColorB;
@@ -244,7 +255,6 @@ export class IslandManager {
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.computeVertexNormals();
 
-    // Cull underwater
     const index = geo.index;
     const newIndices = [];
     for (let i = 0; i < index.count; i += 3) {
@@ -261,8 +271,6 @@ export class IslandManager {
   createTerrainMaterial() {
     return this._sharedMaterials.terrain;
   }
-
-  // ===== Vegetation (generated once per template) =====
 
   createPalmTree(seed) {
     const tree = new THREE.Group();
@@ -327,8 +335,6 @@ export class IslandManager {
     return rock;
   }
 
-  // ===== Cell management =====
-
   setShipPosition(sx, sy, radius) {
     let removed = false;
     for (const [key, cell] of this.sandCells) {
@@ -371,7 +377,7 @@ export class IslandManager {
       if (visited.has(key)) continue;
       const cluster = [];
       const queue = [key];
-      let qIdx = 0; // index-based queue avoids O(n) shift()
+      let qIdx = 0;
       visited.add(key);
 
       while (qIdx < queue.length) {
@@ -397,7 +403,6 @@ export class IslandManager {
     return clusters;
   }
 
-  // Helper to compute min/max without spread (avoids stack overflow on large arrays)
   _minMax(cells) {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < cells.length; i++) {
@@ -410,7 +415,6 @@ export class IslandManager {
     return { minX, maxX, minY, maxY };
   }
 
-  // Dispose a group's geometries (materials are shared, don't dispose them)
   _disposeGroup(group) {
     group.traverse(child => {
       if (child.isMesh && child.geometry) {
@@ -422,7 +426,6 @@ export class IslandManager {
   rebuildAll() {
     const clusters = this.findClusters();
 
-    // Hash: sorted list of "category:cx:cy" to detect changes
     const hashParts = [];
     for (let i = 0; i < clusters.length; i++) {
       const cells = clusters[i];
@@ -437,14 +440,12 @@ export class IslandManager {
     if (hash === this.lastHash) return;
     this.lastHash = hash;
 
-    // Clear existing — dispose geometries to free GPU memory
     for (const [, mesh] of this.islandMeshes) {
       this.scene.remove(mesh);
       this._disposeGroup(mesh);
     }
     this.islandMeshes.clear();
 
-    // Place clones
     for (let i = 0; i < clusters.length; i++) {
       const cells = clusters[i];
       const cat = getCategory(cells.length);
@@ -457,7 +458,6 @@ export class IslandManager {
 
       const clone = template.clone();
 
-      // Scale based on actual cluster size vs template size
       const spanX = maxX - minX + 1;
       const spanY = maxY - minY + 1;
       const actualRadius = Math.max(spanX, spanY) / 2 + 1;
@@ -471,7 +471,6 @@ export class IslandManager {
       const scale = actualRadius / templateRadius;
       clone.scale.setScalar(scale);
 
-      // Random Y rotation for variety
       clone.rotation.y = (centerX * 137 + centerY * 311) % (Math.PI * 2);
 
       clone.position.set(

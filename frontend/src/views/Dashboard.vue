@@ -24,12 +24,11 @@ const brokerStore = useBrokerStore();
 const lastRefresh = ref(null);
 const activeTab = ref('map');
 const autoRefreshEnabled = ref(true);
-const countdown = ref(30); // Polling reduit a 30s car broker en temps reel
+const countdown = ref(30);
 
 let autoRefreshInterval = null;
 let countdownInterval = null;
 
-// Status broker
 const brokerConnected = computed(() => brokerStore.isConnected);
 
 const refresh = () => {
@@ -43,7 +42,6 @@ const startAutoRefresh = () => {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
   if (countdownInterval) clearInterval(countdownInterval);
 
-  // Polling reduit a 30 secondes (le broker gere les mises a jour en temps reel)
   autoRefreshInterval = setInterval(() => {
     if (autoRefreshEnabled.value) {
       refresh();
@@ -67,11 +65,9 @@ const toggleAutoRefresh = () => {
 onMounted(async () => {
   shipStore.loadPositionFromDB();
 
-  // Charger les donnees initiales
   await playerStore.refreshAll();
   lastRefresh.value = new Date().toLocaleTimeString();
 
-  // Connecter le broker si les donnees joueur sont disponibles
   if (playerStore.details?.id) {
     brokerStore.connect(playerStore.details.id, CREDENTIALS.brokerTeamName);
   }

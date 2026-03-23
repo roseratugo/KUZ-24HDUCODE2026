@@ -11,16 +11,13 @@ const containerRef = ref(null);
 
 const CELL_SIZE = 28;
 
-// Camera state (in world pixels)
 const camera = ref({ x: 0, y: 0 });
 const zoomLevel = ref(1);
 
-// Drag state
 const isDragging = ref(false);
 const dragStart = ref({ x: 0, y: 0 });
 const lastMouse = ref({ x: 0, y: 0 });
 
-// Inertia
 const velocity = ref({ x: 0, y: 0 });
 let animFrameId = null;
 
@@ -78,17 +75,14 @@ const draw = () => {
 
   ctx.clearRect(0, 0, w, h);
 
-  // World offset: camera is center of screen
   const offsetX = w / 2 - camera.value.x * z;
   const offsetY = h / 2 - camera.value.y * z;
 
-  // Visible range in cell coords
   const minCellX = Math.floor((camera.value.x * z - w / 2) / cellPx) - 1;
   const maxCellX = Math.ceil((camera.value.x * z + w / 2) / cellPx) + 1;
   const minCellY = Math.floor((camera.value.y * z - h / 2) / cellPx) - 1;
   const maxCellY = Math.ceil((camera.value.y * z + h / 2) / cellPx) + 1;
 
-  // Draw cells
   for (let cy = minCellY; cy <= maxCellY; cy++) {
     for (let cx = minCellX; cx <= maxCellX; cx++) {
       const screenX = offsetX + cx * cellPx;
@@ -96,31 +90,26 @@ const draw = () => {
 
       const cell = mapStore.getCellAt(cx, cy);
 
-      // Background
       ctx.fillStyle = getCellColor(cell);
       if (cell?.state === 'SEEN') ctx.globalAlpha = 0.7;
       else if (cell?.state === 'VISITED') ctx.globalAlpha = 0.5;
       else ctx.globalAlpha = 1;
 
-      // At very low zoom, skip gaps between cells for perf
       const gap = cellPx > 3 ? 1 : 0;
       ctx.fillRect(screenX, screenY, cellPx - gap, cellPx - gap);
       ctx.globalAlpha = 1;
 
-      // Island overlay
       if (cell?.island) {
         const islandColor = getIslandColor(cell);
         ctx.fillStyle = islandColor;
         ctx.fillRect(screenX, screenY, cellPx - gap, cellPx - gap);
 
-        // Only draw details when zoomed in enough
         if (cellPx >= 8) {
           ctx.strokeStyle = islandColor === '#22c55e' ? '#86efac' : '#fde047';
           ctx.lineWidth = cellPx >= 15 ? 2 : 1;
           ctx.strokeRect(screenX + 1, screenY + 1, cellPx - 3, cellPx - 3);
         }
 
-        // Island emoji only when cells are big enough
         if (cellPx >= 18) {
           ctx.font = `${Math.max(10, cellPx * 0.4)}px serif`;
           ctx.textAlign = 'center';
@@ -129,7 +118,6 @@ const draw = () => {
         }
       }
 
-      // Other ships (only when zoomed in)
       if (cellPx >= 15 && cell?.ships?.length) {
         ctx.font = `${Math.max(8, cellPx * 0.35)}px serif`;
         ctx.textAlign = 'center';
@@ -139,17 +127,14 @@ const draw = () => {
     }
   }
 
-  // Draw player ship
   if (shipPosition.value) {
     const sx = offsetX + shipPosition.value.x * cellPx;
     const sy = offsetY + shipPosition.value.y * cellPx;
 
-    // Ship marker scales with zoom - always visible
     const markerSize = Math.max(cellPx, 6);
     const mx = cellPx >= 6 ? sx : sx - (markerSize - cellPx) / 2;
     const my = cellPx >= 6 ? sy : sy - (markerSize - cellPx) / 2;
 
-    // Glow
     ctx.shadowColor = '#e94560';
     ctx.shadowBlur = Math.max(5, 15 * z);
     ctx.strokeStyle = '#e94560';
@@ -157,7 +142,6 @@ const draw = () => {
     ctx.strokeRect(mx, my, markerSize - 1, markerSize - 1);
     ctx.shadowBlur = 0;
 
-    // Ship emoji (or dot at very low zoom)
     if (cellPx >= 12) {
       ctx.font = `${Math.max(12, cellPx * 0.5)}px serif`;
       ctx.textAlign = 'center';
@@ -169,7 +153,6 @@ const draw = () => {
     }
   }
 
-  // Grid lines (only when zoomed in enough)
   if (z >= 0.8) {
     ctx.strokeStyle = 'rgba(15, 52, 96, 0.3)';
     ctx.lineWidth = 0.5;
@@ -199,11 +182,8 @@ const resizeCanvas = () => {
   draw();
 };
 
-// --- Input handlers ---
-
 const handleWheel = (e) => {
   e.preventDefault();
-  // Scale delta proportionally to current zoom for smooth zoom at all levels
   const factor = e.deltaY > 0 ? 0.85 : 1.18;
   zoomLevel.value = Math.max(0.05, Math.min(3, zoomLevel.value * factor));
   mapStore.setZoom(zoomLevel.value);
@@ -237,7 +217,6 @@ const endDrag = () => {
   if (!isDragging.value) return;
   isDragging.value = false;
 
-  // Inertia animation
   const friction = 0.92;
   const animate = () => {
     if (Math.abs(velocity.value.x) < 0.5 && Math.abs(velocity.value.y) < 0.5) {
@@ -274,7 +253,6 @@ const syncViewCenter = () => {
   );
 };
 
-// Touch support
 const handleTouchStart = (e) => {
   if (e.touches.length === 1) {
     const touch = e.touches[0];
@@ -294,7 +272,6 @@ const handleTouchEnd = () => {
   endDrag();
 };
 
-// Hover tooltip
 const hoveredCell = ref(null);
 const tooltipPos = ref({ x: 0, y: 0 });
 
@@ -368,7 +345,6 @@ const formatTime = (isoString) => {
   return new Date(isoString).toLocaleTimeString('fr-FR');
 };
 
-// Watchers
 watch(() => shipStore.position, (newPos) => {
   if (newPos) {
     mapStore.updateShipPosition(newPos);

@@ -13,26 +13,21 @@ const activeTab = ref('resources');
 const loading = ref(false);
 const error = ref(null);
 
-// Resources
 const player = ref(null);
 const resources = ref([]);
 const money = ref(0);
 
-// Marketplace
 const offers = ref([]);
 const buyQty = ref({});
 const newOffer = ref({ resourceType: 'BOISIUM', quantity: 1, unitPrice: 1 });
 
-// Islands
 const discoveredIslands = ref([]);
 const homeIsland = ref(null);
 
-// Thefts
 const thefts = ref([]);
 const newTheft = ref({ resourceType: 'BOISIUM', moneySpent: 100 });
 const sending = ref(false);
 
-// Bot
 const bot = ref({
   running: false, paused: false, state: 'IDLE',
   position: null, energy: 0, maxEnergy: 15,
@@ -67,7 +62,7 @@ const uptimeFormatted = computed(() => {
 });
 
 async function fetchBotStatus() {
-  try { bot.value = await botStatus(); } catch (e) { /* ignore */ }
+  try { bot.value = await botStatus(); } catch (e) { }
 }
 async function fetchBotLogs() {
   try {
@@ -77,7 +72,7 @@ async function fetchBotLogs() {
       botLastLogId.value = data[data.length - 1].id + 1;
       if (botLogsData.value.length > 200) botLogsData.value = botLogsData.value.slice(-200);
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) { }
 }
 function startBotPolling() {
   stopBotPolling();
@@ -107,13 +102,12 @@ async function handleBotResume() {
   try { await botResume(); await fetchBotStatus(); } catch (e) { botError.value = e.response?.data?.message || e.message; }
 }
 async function handleBotClearLogs() {
-  try { await botClearLogs(); botLogsData.value = []; botLastLogId.value = 0; } catch (e) { /* ignore */ }
+  try { await botClearLogs(); botLogsData.value = []; botLastLogId.value = 0; } catch (e) { }
 }
 function logTypeIcon(type) {
   return { info: 'i', success: '+', warn: '!', error: 'x' }[type] || 'i';
 }
 
-// Broker
 const brokerWs = ref(null);
 const brokerStatus = ref('disconnected');
 const brokerError = ref(null);
@@ -168,7 +162,7 @@ function connectBroker() {
             handleMarketplaceBrokerEvent(ev.type, ev.message);
           }
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) { }
     };
     ws.onerror = () => { brokerStatus.value = 'error'; brokerError.value = 'Erreur WebSocket'; };
     ws.onclose = () => { brokerStatus.value = 'disconnected'; brokerWs.value = null; scheduleBrokerReconnect(); };
@@ -188,7 +182,6 @@ function disconnectBroker() {
 }
 function toggleBrokerMsg(msg) { msg.expanded = !msg.expanded; }
 
-// Marketplace live updates via broker
 function handleMarketplaceBrokerEvent(eventType, data) {
   if (!data) return;
   if (eventType === 'OFFRE') {
@@ -291,7 +284,7 @@ async function refreshPlayerInfo() {
     const details = await fetchPlayerDetails();
     money.value = details.money ?? 0;
     resources.value = details.resources || [];
-  } catch (e) { /* ignore */ }
+  } catch (e) { }
 }
 
 async function doPurchase(offerId) {
@@ -358,14 +351,12 @@ function getResourceQty(type) {
   <Teleport to="body">
     <div v-if="visible" class="overlay" @click.self="emit('close')">
       <div class="menu-panel">
-        <!-- Header -->
         <div class="menu-header">
           <h2>Menu</h2>
           <div class="player-money" v-if="money">💰 {{ money.toLocaleString() }}</div>
           <button class="close-btn" @click="emit('close')">✕</button>
         </div>
 
-        <!-- Tabs -->
         <div class="tab-bar">
           <button
             v-for="tab in tabs" :key="tab.key"
@@ -377,16 +368,12 @@ function getResourceQty(type) {
           </button>
         </div>
 
-        <!-- Error -->
         <div v-if="error" class="error-bar">{{ error }}</div>
 
-        <!-- Loading -->
         <div v-if="loading && activeTab !== 'bot' && activeTab !== 'broker'" class="loading">Chargement...</div>
 
-        <!-- Content -->
         <div v-else class="tab-content">
 
-          <!-- RESOURCES -->
           <div v-if="activeTab === 'resources'" class="resources-tab">
             <div class="resource-grid">
               <div v-for="(cfg, type) in resourceConfig" :key="type" class="resource-card"
@@ -415,7 +402,6 @@ function getResourceQty(type) {
             </div>
           </div>
 
-          <!-- MARKETPLACE -->
           <div v-if="activeTab === 'marketplace'" class="marketplace-tab">
             <div class="section-box">
               <h3>Creer une offre</h3>
@@ -455,7 +441,6 @@ function getResourceQty(type) {
             </div>
           </div>
 
-          <!-- ISLANDS -->
           <div v-if="activeTab === 'islands'" class="islands-tab">
             <div v-if="homeIsland" class="home-card">
               <span class="home-badge">Ile de depart</span>
@@ -477,7 +462,6 @@ function getResourceQty(type) {
             </div>
           </div>
 
-          <!-- THEFTS -->
           <div v-if="activeTab === 'thefts'" class="thefts-tab">
             <div class="section-box">
               <h3>Lancer un vol</h3>
@@ -513,7 +497,6 @@ function getResourceQty(type) {
             </div>
           </div>
 
-          <!-- BOT -->
           <div v-if="activeTab === 'bot'" class="bot-tab">
             <div class="bot-header-row">
               <h3>Bot Explorateur</h3>
@@ -573,7 +556,6 @@ function getResourceQty(type) {
             </div>
           </div>
 
-          <!-- BROKER -->
           <div v-if="activeTab === 'broker'" class="broker-tab">
             <div class="broker-header">
               <div>
@@ -684,7 +666,6 @@ function getResourceQty(type) {
   border-color: #e94560;
 }
 
-/* Tabs */
 .tab-bar {
   display: flex;
   gap: 2px;
@@ -735,7 +716,6 @@ function getResourceQty(type) {
   padding: 16px 20px;
 }
 
-/* Resources */
 .resource-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -779,7 +759,6 @@ function getResourceQty(type) {
 }
 .storage-text { color: #64748b; font-size: 0.75rem; min-width: 70px; text-align: right; }
 
-/* Marketplace */
 .section-box {
   background: rgba(15, 52, 96, 0.2);
   border-radius: 10px;
@@ -863,7 +842,6 @@ function getResourceQty(type) {
   font-size: 0.8rem;
 }
 
-/* Islands */
 .home-card {
   background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(15, 52, 96, 0.3));
   border: 1px solid rgba(34, 197, 94, 0.3);
@@ -913,7 +891,6 @@ function getResourceQty(type) {
 .island-state.discovered { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
 .island-bonus { color: #64748b; font-size: 0.8rem; }
 
-/* Thefts */
 .thefts-tab h3 { color: #94a3b8; font-size: 0.85rem; margin-bottom: 10px; }
 .thefts-grid {
   display: grid;
@@ -943,7 +920,6 @@ function getResourceQty(type) {
 }
 .det-label { color: #64748b; margin-right: 4px; }
 
-/* Bot */
 .bot-header-row {
   display: flex;
   justify-content: space-between;
@@ -1039,7 +1015,6 @@ function getResourceQty(type) {
 .log-time { color: #64748b; font-family: monospace; white-space: nowrap; flex-shrink: 0; }
 .log-msg { color: #cbd5e1; word-break: break-word; }
 
-/* Broker */
 .broker-header {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid rgba(15, 52, 96, 0.5);
@@ -1100,7 +1075,6 @@ function getResourceQty(type) {
   grid-column: 1 / -1;
 }
 
-/* Scrollbar */
 .tab-content::-webkit-scrollbar,
 .offers-list::-webkit-scrollbar,
 .logs-list::-webkit-scrollbar,

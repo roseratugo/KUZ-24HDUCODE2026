@@ -1,9 +1,29 @@
+/**
+ * Routes REST pour l'historique des deplacements du bateau
+ *
+ * Chaque mouvement du bateau est enregistre avec :
+ * - La direction (N, NE, E, SE, S, SW, W, NW)
+ * - La position de depart et d'arrivee
+ * - L'energie avant/apres le deplacement
+ * - Le nombre de cellules decouvertes grace a ce mouvement
+ *
+ * Ces donnees sont utilisees par le dashboard pour afficher des statistiques
+ * d'exploration (nombre total de mouvements, directions preferees, etc.)
+ *
+ * Endpoints :
+ * GET    /api/moves/:gameId                → les 500 derniers mouvements
+ * GET    /api/moves/:gameId/recent/:limit  → les N derniers mouvements
+ * POST   /api/moves                         → enregistrer un nouveau mouvement
+ * GET    /api/moves/:gameId/stats           → statistiques agregees
+ * DELETE /api/moves/:gameId                 → supprimer l'historique
+ */
+
 import express from 'express';
 import Move from '../models/Move.js';
 
 const router = express.Router();
 
-// Get all moves for a game
+// Les 500 derniers mouvements, tries du plus recent au plus ancien
 router.get('/:gameId', async (req, res) => {
   try {
     const moves = await Move.find({ gameId: req.params.gameId })
@@ -15,7 +35,7 @@ router.get('/:gameId', async (req, res) => {
   }
 });
 
-// Get recent moves (last N)
+// Les N derniers mouvements (parametre dynamique dans l'URL)
 router.get('/:gameId/recent/:limit', async (req, res) => {
   try {
     const limit = parseInt(req.params.limit) || 50;
@@ -28,7 +48,7 @@ router.get('/:gameId/recent/:limit', async (req, res) => {
   }
 });
 
-// Add a new move
+// Enregistrer un nouveau mouvement
 router.post('/', async (req, res) => {
   try {
     const moveData = {
@@ -52,7 +72,18 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Get move stats for a game
+/**
+ * Statistiques agregees des mouvements
+ *
+ * Utilise l'aggregation MongoDB pour calculer en une seule requete :
+ * - Nombre total de mouvements
+ * - Nombre total de cellules decouvertes
+ * - Comptage par direction (N, S, E, W, etc.)
+ * - Premier et dernier mouvement
+ *
+ * $match filtre par gameId, $group agrege les resultats.
+ * C'est bien plus efficace que de charger tous les mouvements en memoire.
+ */
 router.get('/:gameId/stats', async (req, res) => {
   try {
     const stats = await Move.aggregate([
@@ -63,7 +94,7 @@ router.get('/:gameId/stats', async (req, res) => {
           totalMoves: { $sum: 1 },
           totalCellsDiscovered: { $sum: '$cellsDiscovered' },
           directionCounts: {
-            $push: '$direction'
+            $push: '$direction' // Collecte toutes les directions dans un tableau
           },
           firstMove: { $min: '$timestamp' },
           lastMove: { $max: '$timestamp' }
@@ -81,7 +112,7 @@ router.get('/:gameId/stats', async (req, res) => {
       });
     }
 
-    // Count directions
+    // Transforme le tableau de directions en objet { N: 42, S: 38, E: 51, ... }
     const directionCounts = {};
     stats[0].directionCounts.forEach(dir => {
       directionCounts[dir] = (directionCounts[dir] || 0) + 1;
@@ -99,7 +130,7 @@ router.get('/:gameId/stats', async (req, res) => {
   }
 });
 
-// Clear all moves for a game (useful for reset)
+// Supprimer tout l'historique des mouvements d'une partie
 router.delete('/:gameId', async (req, res) => {
   try {
     const result = await Move.deleteMany({ gameId: req.params.gameId });
