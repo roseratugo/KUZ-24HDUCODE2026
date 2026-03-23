@@ -1,3 +1,12 @@
+/**
+ * Chargement du modele 3D du bateau (GLTF)
+ *
+ * Charge le modele "vogmerry" depuis /models/vogmerry/scene.gltf
+ * Auto-scale le modele pour qu'il tienne dans une bounding box de 30 unites.
+ * Ajoute un PointLight rouge (#e94560) au-dessus du bateau pour l'eclairage ambiant.
+ * En cas d'erreur de chargement, le code appelant (scene.js) utilise un cube brun comme fallback.
+ */
+
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 

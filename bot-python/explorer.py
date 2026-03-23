@@ -1,3 +1,22 @@
+"""
+SmartExplorer — Le cerveau du bot d'exploration.
+
+Machine a etats avec 5 modes : IDLE, EXPLORING, RETURNING, RECHARGING, RESCUE.
+
+Algorithme d'exploration base sur une frontiere :
+- Les cellules explorees sont stockees dans un set pour un lookup O(1)
+- La frontiere = cellules explorees ayant au moins un voisin inexplore
+- A chaque tick, le bot choisit la meilleure cellule de la frontiere selon un score
+  qui combine : distance, nombre de voisins inconnus, distance retour base
+
+Gestion de l'energie :
+- Le bot garde toujours SAFETY_BUFFER points de reserve
+- Distance calculee en Chebyshev (max(|dx|, |dy|)) car le bateau bouge en 8 directions
+- Quand l'energie est basse, retour a la base de recharge la plus proche
+
+Double persistance : MongoDB (direct) + Backend (notification HTTP fire-and-forget)
+"""
+
 import time
 from datetime import datetime
 from typing import Optional, Tuple, Set, List
@@ -7,6 +26,8 @@ from config import SAFETY_BUFFER, TICK_INTERVAL, RECHARGE_THRESHOLD
 
 
 class SmartExplorer:
+    # Les 8 voisins d'une cellule (incluant les diagonales)
+    # Utilise pour la detection de frontiere et le comptage de voisins inconnus
     NEIGHBORS = [
         (-1, -1), (0, -1), (1, -1),
         (-1, 0),          (1, 0),
@@ -64,6 +85,12 @@ class SmartExplorer:
         self.logs = []
 
     def chebyshev(self, a: Tuple[int, int], b: Tuple[int, int]) -> int:
+        """
+        Distance de Chebyshev = max(|dx|, |dy|).
+        C'est la distance reelle en nombre de mouvements car le bateau
+        peut se deplacer en diagonale (8 directions).
+        Ex: (0,0) → (3,5) = 5 mouvements (pas 8 comme en Manhattan).
+        """
         return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
 
     def get_nearest_base(self) -> Optional[Tuple[int, int]]:
@@ -108,6 +135,11 @@ class SmartExplorer:
         return direction or "N"
 
     def build_frontier_from_explored(self):
+        """
+        Reconstruit la frontiere a partir de zero.
+        Appele au demarrage apres avoir charge les cellules explorees depuis MongoDB.
+        Une cellule est en frontiere si elle a au moins un voisin qui n'est pas explore.
+        """
         self.frontier_cells.clear()
 
         for (x, y) in self.explored_cells:
@@ -120,6 +152,11 @@ class SmartExplorer:
         self.log(f"Frontière reconstruite: {len(self.frontier_cells)} cellules")
 
     def update_frontier(self, new_cells: list):
+        """
+        Met a jour incrementalement la frontiere apres avoir decouvert de nouvelles cellules.
+        Plus efficace que de tout reconstruire : on ajoute les nouvelles cellules
+        et on retire celles qui n'ont plus de voisins inconnus.
+        """
         for cell in new_cells:
             coord = (cell["x"], cell["y"])
             self.explored_cells.add(coord)
@@ -157,6 +194,19 @@ class SmartExplorer:
         return count
 
     def choose_best_frontier(self) -> Optional[Tuple[int, int]]:
+        """
+        Choisit la meilleure cellule de frontiere a explorer.
+
+        Algorithme de scoring :
+        1. Filtre les cellules inaccessibles (cout aller + retour base + marge > energie)
+        2. Score chaque cellule restante :
+           - +100/(distance+1)  : prefere les cellules proches (decroit vite avec la distance)
+           - +15*voisins_inconnus : prefere les zones avec beaucoup de terrain inexplore
+           - -0.5*distance_base  : penalise les cellules loin d'une base de recharge
+        3. Trie par score decroissant, retourne la meilleure
+
+        Retourne None si aucune cellule n'est atteignable en securite.
+        """
         if not self.frontier_cells or not self.position:
             return None
 
@@ -173,17 +223,22 @@ class SmartExplorer:
             else:
                 dist_to_base = 0
 
+            # Cout total = aller a la frontiere + revenir a la base + marge de securite
+            # Si ce cout depasse l'energie, on ne peut pas y aller en securite
             total_cost = dist_to_frontier + dist_to_base + SAFETY_BUFFER
 
             if total_cost > self.energy:
                 continue
 
             score = 0
+            # Bonus proximite : 100 pour une cellule adjacente, 50 a 2 cases, 33 a 3 cases...
             score += 100 / (dist_to_frontier + 1)
 
+            # Bonus decouverte : plus une cellule a de voisins inexplores, plus elle est interessante
             unknown_count = self.count_unknown_neighbors(frontier)
             score += unknown_count * 15
 
+            # Penalite eloignement base : evite de s'aventurer trop loin
             if nearest_base:
                 score -= dist_to_base * 0.5
 
@@ -608,6 +663,12 @@ class SmartExplorer:
             pass
 
     def tick(self):
+        """
+        Un tick = une action du bot selon son etat actuel.
+        C'est le dispatch central de la machine a etats.
+        Les erreurs sont gerees par type : detresse → RESCUE, rate limit → attendre,
+        auth → stop, autre → verifier les taxes.
+        """
         try:
             if self.state == "EXPLORING":
                 self.handle_exploring()
@@ -655,6 +716,13 @@ class SmartExplorer:
         self.log(f"Bot démarré en mode {self.state}", "success")
 
     def run_loop(self):
+        """
+        Boucle principale du bot — tourne dans un thread daemon.
+        A chaque iteration : execute un tick (un mouvement ou une action),
+        puis attend avant le prochain tick.
+        En mode RECHARGING, on attend 5s car l'energie se regenere lentement.
+        En mode EXPLORING, on attend TICK_INTERVAL (1s) pour explorer vite.
+        """
         while self.running:
             self.tick()
             delay = 5.0 if self.state == "RECHARGING" else TICK_INTERVAL

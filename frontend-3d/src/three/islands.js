@@ -1,6 +1,35 @@
+/**
+ * IslandManager — Generation procedurale des iles en 3D
+ *
+ * Les iles ne sont pas des modeles 3D statiques — elles sont generees
+ * dynamiquement a partir des cellules SAND de la carte du jeu.
+ *
+ * Pipeline de rendu :
+ * 1. Le backend envoie les cellules SAND proches du bateau
+ * 2. findClusters() detecte les groupes de cellules adjacentes (BFS 8 directions)
+ * 3. Chaque cluster est classifie par taille : TINY (≤2), SMALL (≤15), MEDIUM (<50), LARGE (≥50)
+ * 4. Un template pre-construit est clone et redimensionne pour chaque cluster
+ *
+ * Templates par taille :
+ * - TINY  : simple dodecaedre aplati (sable)
+ * - SMALL : terrain avec bruit simplex + 2 palmiers
+ * - MEDIUM : terrain + 5 palmiers + 3 buissons + 2 rochers
+ * - LARGE : terrain + anneau d'eau peu profonde + 12 palmiers + 6 buissons + 4 rochers
+ *
+ * Le terrain est un PlaneGeometry deforme par vertex avec :
+ * - Bruit simplex a 2 octaves pour la forme de cote (irreguliere)
+ * - Profil smoothstep pour la forme generale (haut au centre, bas aux bords)
+ * - Vertex colors : brun sous-marin → sable → herbe → vert fonce → gris roche
+ * - Les triangles sous l'eau sont supprimes du buffer d'index (optimisation)
+ *
+ * Les palmiers sont des TubeGeometry (tronc courbe) + ShapeGeometry (6 palmes).
+ * Tous les materiaux sont partages (crees une seule fois) pour economiser la VRAM.
+ */
+
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 
+// Deux generateurs de bruit independants pour les deux octaves du terrain
 const noise2D = createNoise2D();
 const noise2D_2 = createNoise2D();
 

@@ -1,18 +1,45 @@
+/**
+ * Routes REST pour l'historique des prix
+ *
+ * Le dashboard affiche des graphiques d'evolution des prix pour les 3 ressources.
+ * Les snapshots sont enregistres periodiquement et stockes en base.
+ *
+ * Le parametre ?hours= permet de limiter la fenetre temporelle (defaut: 24h).
+ *
+ * Endpoints :
+ * GET    /api/prices/:gameId                   → historique groupe par ressource
+ * GET    /api/prices/:gameId/:resourceType     → historique pour une ressource
+ * POST   /api/prices                            → enregistrer un snapshot
+ * POST   /api/prices/bulk                       → enregistrer plusieurs snapshots
+ * GET    /api/prices/:gameId/latest/all         → dernier prix connu par ressource
+ * DELETE /api/prices/:gameId                    → supprimer l'historique
+ */
+
 import express from 'express';
 import PriceHistory from '../models/PriceHistory.js';
 
 const router = express.Router();
 
+/**
+ * Historique des prix pour toutes les ressources, groupe par type
+ * Retourne un objet { BOISIUM: [...], FERONIUM: [...], CHARBONIUM: [...] }
+ * Chaque entree contient time, avg, min, max, count, totalQuantity
+ *
+ * Le parametre ?hours= limite la fenetre (defaut 24h)
+ */
 router.get('/:gameId', async (req, res) => {
   try {
     const { hours = 24 } = req.query;
+    // Calcule la date de debut : maintenant - N heures
     const since = new Date(Date.now() - parseInt(hours) * 60 * 60 * 1000);
 
+    // $gte = "greater than or equal" → tous les snapshots depuis `since`
     const history = await PriceHistory.find({
       gameId: req.params.gameId,
       timestamp: { $gte: since }
     }).sort({ timestamp: -1 });
 
+    // Groupe les resultats par type de ressource
     const grouped = {
       BOISIUM: [],
       FERONIUM: [],
@@ -32,6 +59,7 @@ router.get('/:gameId', async (req, res) => {
       }
     });
 
+    // Inverse pour avoir l'ordre chronologique (le tri MongoDB est desc)
     Object.keys(grouped).forEach(key => {
       grouped[key].reverse();
     });
@@ -42,6 +70,7 @@ router.get('/:gameId', async (req, res) => {
   }
 });
 
+// Historique pour une seule ressource
 router.get('/:gameId/:resourceType', async (req, res) => {
   try {
     const { hours = 24 } = req.query;
@@ -66,6 +95,7 @@ router.get('/:gameId/:resourceType', async (req, res) => {
   }
 });
 
+// Enregistrer un seul snapshot de prix
 router.post('/', async (req, res) => {
   try {
     const { gameId, resourceType, avgPrice, minPrice, maxPrice, offerCount, totalQuantity } = req.body;
@@ -91,6 +121,8 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Enregistrer plusieurs snapshots en une seule requete (un par ressource typiquement)
+// insertMany est plus performant que plusieurs save() individuels
 router.post('/bulk', async (req, res) => {
   try {
     const { gameId, snapshots } = req.body;
@@ -108,7 +140,7 @@ router.post('/bulk', async (req, res) => {
       maxPrice: s.maxPrice || s.avgPrice,
       offerCount: s.offerCount || 0,
       totalQuantity: s.totalQuantity || 0,
-      timestamp
+      timestamp // Meme timestamp pour tous les snapshots du meme lot
     }));
 
     const saved = await PriceHistory.insertMany(documents);
@@ -118,11 +150,13 @@ router.post('/bulk', async (req, res) => {
   }
 });
 
+// Dernier prix connu pour chaque ressource (utile pour afficher les prix actuels)
 router.get('/:gameId/latest/all', async (req, res) => {
   try {
     const latest = {};
 
     for (const resourceType of ['BOISIUM', 'FERONIUM', 'CHARBONIUM']) {
+      // sort({ timestamp: -1 }) + findOne = dernier snapshot
       const entry = await PriceHistory.findOne({
         gameId: req.params.gameId,
         resourceType
@@ -146,6 +180,7 @@ router.get('/:gameId/latest/all', async (req, res) => {
   }
 });
 
+// Supprimer tout l'historique des prix d'une partie
 router.delete('/:gameId', async (req, res) => {
   try {
     const result = await PriceHistory.deleteMany({ gameId: req.params.gameId });

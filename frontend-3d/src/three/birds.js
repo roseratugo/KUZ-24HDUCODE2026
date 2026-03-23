@@ -1,3 +1,19 @@
+/**
+ * BirdManager — Oiseaux animes en orbite autour des iles
+ *
+ * Charge un modele GLTF d'oiseau avec animation de vol (ailes qui battent).
+ * Pour chaque ile assez grande (≥3 cellules), un vol de 3 oiseaux max est cree.
+ *
+ * Chaque oiseau :
+ * - Orbite en cercle autour du centre de l'ile
+ * - Bob verticalement (oscillation sinusoidale)
+ * - S'incline (bank) dans les virages
+ * - A une vitesse d'orbite et une hauteur aleatoires
+ *
+ * Les oiseaux sont clones avec SkeletonUtils.clone() qui preserve le squelette
+ * et les animations (contrairement a Object3D.clone() qui perdrait les bones).
+ */
+
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
